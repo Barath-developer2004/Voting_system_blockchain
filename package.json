@@ -1,0 +1,28 @@
+{
+    "name": "blockchain-voting-system",
+    "version": "1.0.0",
+    "description": "Blockchain-based voting system for citizens on Internet Computer",
+    "scripts": {
+        "setup": "bash setup.sh",
+        "start": "dfx start --background",
+        "deploy": "dfx deploy",
+        "deploy:backend": "dfx deploy voting_backend",
+        "deploy:frontend": "dfx deploy voting_frontend",
+        "stop": "dfx stop",
+        "clean": "dfx stop && rm -rf .dfx && dfx start --background --clean",
+        "frontend": "cd src/voting_frontend && npm start",
+        "build": "cd src/voting_frontend && npm run build",
+        "test": "echo 'No tests yet' && exit 0"
+    },
+    "keywords": [
+        "blockchain",
+        "voting",
+        "icp",
+        "internet-computer",
+        "motoko",
+        "react",
+        "web3"
+    ],
+    "author": "Sarankumar",
+    "license": "MIT"
+}

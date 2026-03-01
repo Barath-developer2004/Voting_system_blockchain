@@ -1,0 +1,262 @@
+type VoterStatus = 
+ variant {
+   Pending;
+   Rejected;
+   Suspended;
+   Verified;
+ };
+type Time = int;
+type Statistics = 
+ record {
+   activeElections: nat;
+   pendingVerifications: nat;
+   totalCitizens: nat;
+   totalElections: nat;
+   totalVotesCast: nat;
+   verifiedCitizens: nat;
+ };
+type Result_8 = 
+ variant {
+   err: text;
+   ok: nat;
+ };
+type Result_7 = 
+ variant {
+   err: text;
+   ok: vec principal;
+ };
+type Result_6 = 
+ variant {
+   err: text;
+   ok: vec AuditLog;
+ };
+type Result_5 = 
+ variant {
+   err: text;
+   ok: Election;
+ };
+type Result_4 = 
+ variant {
+   err: text;
+   ok: ElectionResults;
+ };
+type Result_3 = 
+ variant {
+   err: text;
+   ok: Citizen;
+ };
+type Result_2 = 
+ variant {
+   err: text;
+   ok: vec Citizen;
+ };
+type Result_1 = 
+ variant {
+   err: text;
+   ok: bool;
+ };
+type Result = 
+ variant {
+   err: text;
+   ok: text;
+ };
+type Gender = 
+ variant {
+   Female;
+   Male;
+   Other;
+ };
+type ElectionType = 
+ variant {
+   ByElection;
+   General;
+   LocalBody;
+   Referendum;
+ };
+type ElectionStatus = 
+ variant {
+   Cancelled;
+   RegistrationClosed;
+   RegistrationOpen;
+   ResultsDeclared;
+   Upcoming;
+   VotingClosed;
+   VotingOpen;
+ };
+type ElectionResults = 
+ record {
+   candidates: vec record {
+                     nat;
+                     text;
+                     text;
+                     nat;
+                   };
+   electionId: nat;
+   electionTitle: text;
+   status: ElectionStatus;
+   totalVotes: nat;
+   winner: opt record {
+                 nat;
+                 text;
+                 text;
+                 nat;
+               };
+ };
+type ElectionLevel = 
+ variant {
+   District;
+   Municipal;
+   National;
+   State;
+   Village;
+ };
+type ElectionInput = 
+ record {
+   constituency: text;
+   description: text;
+   electionType: ElectionType;
+   level: ElectionLevel;
+   state: opt text;
+   title: text;
+   votingEndDate: Time;
+   votingStartDate: Time;
+ };
+type Election = 
+ record {
+   constituency: text;
+   createdAt: Time;
+   createdBy: principal;
+   description: text;
+   electionType: ElectionType;
+   id: nat;
+   level: ElectionLevel;
+   registrationEndDate: Time;
+   registrationStartDate: Time;
+   state: opt text;
+   status: ElectionStatus;
+   title: text;
+   totalVotes: nat;
+   votingEndDate: Time;
+   votingStartDate: Time;
+   winnerCandidateId: opt nat;
+ };
+type Citizen = 
+ record {
+   aadhaarNumber: text;
+   aadhaarPhotoUrl: text;
+   addressLine1: text;
+   addressLine2: text;
+   age: nat;
+   city: text;
+   constituency: text;
+   dateOfBirth: text;
+   district: text;
+   email: opt text;
+   fullName: text;
+   gender: Gender;
+   isEligible: bool;
+   lastUpdated: Time;
+   mobileNumber: text;
+   photoUrl: text;
+   pincode: text;
+   "principal": principal;
+   registrationTime: Time;
+   state: text;
+   status: VoterStatus;
+   verifiedAt: opt Time;
+   verifiedBy: opt principal;
+   voterIdNumber: text;
+   voterIdPhotoUrl: opt text;
+ };
+type CandidateInput = 
+ record {
+   age: nat;
+   constituency: text;
+   education: text;
+   electionId: nat;
+   manifesto: text;
+   name: text;
+   occupation: text;
+   party: text;
+   partySymbol: text;
+   photoUrl: text;
+ };
+type Candidate = 
+ record {
+   addedAt: Time;
+   addedBy: principal;
+   age: nat;
+   constituency: text;
+   education: text;
+   electionId: nat;
+   id: nat;
+   manifesto: text;
+   name: text;
+   occupation: text;
+   party: text;
+   partySymbol: text;
+   photoUrl: text;
+   votesReceived: nat;
+ };
+type BiometricVerificationRequest = 
+ record {
+   authenticatorData: text;
+   clientDataJSON: text;
+   credentialId: text;
+   signature: text;
+ };
+type AuditLog = 
+ record {
+   action: text;
+   actorPrincipal: principal;
+   details: text;
+   target: opt principal;
+   timestamp: Time;
+ };
+type AddressInfo = 
+ record {
+   city: text;
+   district: text;
+   line1: text;
+   line2: text;
+   pincode: text;
+   state: text;
+ };
+service : {
+  addAdmin: (newAdmin: principal) -> (Result);
+  addCandidate: (input: CandidateInput) -> (Result_8);
+  amIAdmin: () -> (bool) query;
+  castVote: (electionId: nat, candidateId: nat) -> (Result);
+  createElection: (input: ElectionInput) -> (Result_8);
+  endVoting: (electionId: nat) -> (Result);
+  enrollBiometricCredential: (credentialId: text, clientDataJSON: text,
+   attestationObject: text) -> (Result);
+  getAdmins: () -> (Result_7) query;
+  getAllCitizens: () -> (Result_2) query;
+  getAllElections: () -> (vec Election) query;
+  getAuditLogs: (limit: nat) -> (Result_6) query;
+  getBiometricStatus: () -> (Result_1) query;
+  getCandidates: (electionId: nat) -> (vec Candidate) query;
+  getElection: (electionId: nat) -> (Result_5) query;
+  getElectionResults: (electionId: nat) -> (Result_4) query;
+  getMyCitizenProfile: () -> (Result_3) query;
+  getPendingCitizens: () -> (Result_2) query;
+  getStatistics: () -> (Statistics) query;
+  getSystemInfo: () ->
+   (record {
+      initialized: bool;
+      totalAdmins: nat;
+      version: text;
+    }) query;
+  hasVoted: (electionId: nat) -> (bool) query;
+  initialize: () -> (Result);
+  registerCitizen: (fullName: text, dateOfBirth: text, aadhaarNumber: 
+   text, mobileNumber: text, address: AddressInfo, gender: Gender,
+   aadhaarPhotoUrl: text, photoUrl: text, voterIdNumber: text) -> (Result);
+  removeBiometricCredential: () -> (Result);
+  startVoting: (electionId: nat) -> (Result);
+  verifyBiometricCredential: (request: BiometricVerificationRequest) ->
+   (Result_1);
+  verifyCitizen: (citizenPrincipal: principal, approve: bool, voterIdNumber:
+   opt text, rejectionReason: opt text) -> (Result);
+}

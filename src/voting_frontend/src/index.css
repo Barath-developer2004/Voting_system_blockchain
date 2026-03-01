@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+        'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+        sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    min-height: 100vh;
+}
+
+code {
+    font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+        monospace;
+}
+
+@layer components {
+    .btn {
+        @apply px-6 py-3 rounded-xl font-semibold transition-all duration-300 transform hover:scale-105 hover:shadow-2xl;
+    }
+
+    .btn-primary {
+        @apply bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-700 hover:to-purple-700 shadow-lg shadow-blue-500/50;
+    }
+
+    .btn-secondary {
+        @apply bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-700 hover:to-teal-700 shadow-lg;
+    }
+
+    .btn-outline {
+        @apply border-2 border-blue-500 text-blue-400 hover:bg-blue-500 hover:text-white backdrop-blur-sm;
+    }
+
+    .card {
+        @apply bg-slate-800/90 backdrop-blur-xl rounded-2xl shadow-2xl p-8 transition-all duration-300 border border-slate-700/50 hover:border-blue-500/50 hover:-translate-y-1;
+    }
+
+    .input {
+        @apply w-full px-5 py-3 bg-slate-900/50 border-2 border-slate-700 text-white rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/30 focus:border-blue-500 transition-all duration-200 placeholder-slate-400;
+    }
+
+    .label {
+        @apply block text-sm font-semibold text-slate-300 mb-2;
+    }
+
+    .gradient-text {
+        @apply bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent;
+    }
+}

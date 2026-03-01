@@ -1,0 +1,39 @@
+{
+    "canisters": {
+        "voting_backend": {
+            "main": "src/voting_backend/main.mo",
+            "type": "motoko"
+        },
+        "voting_frontend": {
+            "dependencies": [
+                "voting_backend"
+            ],
+            "source": [
+                "src/voting_frontend/dist"
+            ],
+            "type": "assets",
+            "frontend": {
+                "entrypoint": "src/voting_frontend/dist/index.html"
+            }
+        },
+        "internet_identity": {
+            "type": "custom",
+            "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
+            "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz",
+            "remote": {
+                "id": {
+                    "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+                }
+            },
+            "frontend": {}
+        }
+    },
+    "defaults": {
+        "build": {
+            "args": "",
+            "packtool": ""
+        }
+    },
+    "output_env_file": ".env",
+    "version": 1
+}
