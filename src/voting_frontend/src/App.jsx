@@ -19,6 +19,7 @@ function App() {
   const [currentView, setCurrentView] = useState('home');
   const [systemInfo, setSystemInfo] = useState(null);
   const [showBiometricSetup, setShowBiometricSetup] = useState(false);
+  const [claimingAdmin, setClaimingAdmin] = useState(false);
 
   useEffect(() => {
     initApp();
@@ -119,40 +120,44 @@ function App() {
     }
   };
 
-  const initializeSystem = async () => {
+  // Self-service admin claim — first logged-in user becomes admin
+  const handleClaimAdmin = async () => {
     try {
-      console.log('🚀 Attempting to initialize system...');
-      setLoading(true);
-      
-      const result = await api.initializeSystem();
-      console.log('📊 Initialization result:', result);
-      
+      setClaimingAdmin(true);
+      console.log('🔧 Claiming admin role...');
+      const result = await api.claimAdmin();
+      console.log('✅ Claim result:', result);
+
       if (result.ok) {
-        console.log('✅ System initialized successfully!');
-        alert('✅ ' + result.ok);
-        // Refresh the app state
-        await initApp();
+        setIsAdmin(true);
+        setCurrentView('dashboard');
+        // Refresh system info
+        const info = await api.getSystemInfo();
+        setSystemInfo(info);
       } else if (result.err) {
-        console.error('❌ Initialization error:', result.err);
-        alert('❌ Error: ' + result.err);
-      } else {
-        console.error('❌ Unexpected result format:', result);
-        alert('❌ Unexpected response from server. Check console for details.');
+        alert('Could not claim admin: ' + result.err);
       }
     } catch (error) {
-      console.error('❌ Error initializing system:', error);
-      alert('❌ Failed to initialize system: ' + error.message + '\n\nPlease check the browser console for details.');
+      console.error('❌ Error claiming admin:', error);
+      alert('Error claiming admin: ' + error.message);
     } finally {
-      setLoading(false);
+      setClaimingAdmin(false);
     }
   };
 
+
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-20 w-20 border-4 border-blue-500/30 border-t-blue-500 mx-auto shadow-glow"></div>
-          <p className="mt-6 text-slate-300 text-xl font-semibold">Loading Voting System...</p>
+      <div className="min-h-screen bg-surface-950 flex items-center justify-center bg-radial-glow">
+        <div className="text-center animate-fade-in">
+          <div className="relative w-20 h-20 mx-auto mb-6">
+            <div className="absolute inset-0 rounded-full border-2 border-brand-500/20" />
+            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-brand-500 animate-spin" />
+            <div className="absolute inset-3 rounded-full border-2 border-transparent border-t-purple-500 animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
+          </div>
+          <p className="text-lg font-semibold text-white">Loading Voting System</p>
+          <p className="text-sm text-surface-500 mt-1">Connecting to blockchain...</p>
         </div>
       </div>
     );
@@ -174,6 +179,51 @@ function App() {
       />
       
       <main className="container mx-auto px-6 py-12">
+        {/* ADMIN SETUP SCREEN — shown when logged in but no admin exists yet */}
+        {isAuthenticated && !isAdmin && systemInfo && systemInfo.totalAdmins === 0 && (
+          <div className="max-w-lg mx-auto text-center py-20 animate-fade-in">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-brand-600/20 border border-brand-500/30 mb-6">
+              <svg className="w-10 h-10 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-3">System Setup</h2>
+            <p className="text-surface-400 mb-2">
+              This voting system has just been deployed and needs an <strong className="text-white">Election Officer (Admin)</strong>.
+            </p>
+            <p className="text-surface-500 text-sm mb-8">
+              You are the first person to log in. Click below to become the admin. Only one person can claim this role.
+            </p>
+
+            <div className="bg-surface-900/60 border border-surface-700/40 rounded-xl p-4 mb-8 text-left">
+              <p className="text-xs text-surface-500 uppercase tracking-wider mb-2">Your Identity</p>
+              <code className="text-sm font-mono text-brand-300 break-all">{principal}</code>
+            </div>
+
+            <button
+              onClick={handleClaimAdmin}
+              disabled={claimingAdmin}
+              className="btn btn-primary px-8 py-3 text-base font-semibold disabled:opacity-50"
+            >
+              {claimingAdmin ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white inline" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                  </svg>
+                  Setting up...
+                </>
+              ) : (
+                '🛡️ Claim Admin Role'
+              )}
+            </button>
+
+            <p className="text-xs text-surface-600 mt-6">
+              This is recorded on the blockchain as an immutable audit event.
+            </p>
+          </div>
+        )}
+
         {!isAuthenticated && currentView === 'home' && (
           <>
             <Home 
@@ -222,20 +272,7 @@ function App() {
           </div>
         )}
         
-        {isAuthenticated && !systemInfo?.initialized && !isAdmin && (
-          <div className="max-w-2xl mx-auto text-center card animate-slide-up">
-            <h2 className="text-3xl font-bold gradient-text mb-4">System Not Initialized</h2>
-            <p className="text-slate-300 mb-6 text-lg">
-              The voting system needs to be initialized. The first user to initialize becomes the Super Admin.
-            </p>
-            <button
-              onClick={initializeSystem}
-              className="btn btn-primary"
-            >
-              🚀 Initialize System & Become Admin
-            </button>
-          </div>
-        )}
+
         
         {isAuthenticated && currentView === 'dashboard' && isAdmin && viewAs !== 'voter' && (
           <AdminDashboard />
@@ -254,10 +291,10 @@ function App() {
         )}
       </main>
       
-      <footer className="bg-slate-800/50 backdrop-blur-md border-t border-slate-700/50 mt-16 py-8">
-        <div className="container mx-auto px-6 text-center text-slate-400">
-          <p className="text-lg font-semibold mb-2">🗳️ Blockchain Voting System | Built on Internet Computer</p>
-          <p className="text-sm opacity-90">Secure • Transparent • Tamper-Proof • Zero Gas Fees</p>
+      <footer className="border-t border-surface-800/60 mt-16 py-8">
+        <div className="container mx-auto px-6 text-center">
+          <p className="text-sm font-medium text-surface-400">Blockchain Voting System <span className="text-surface-600 mx-2">·</span> Built on Internet Computer</p>
+          <p className="text-xs text-surface-600 mt-1.5">Secure · Transparent · Tamper-Proof · Zero Gas Fees</p>
         </div>
       </footer>
     </div>

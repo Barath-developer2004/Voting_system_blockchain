@@ -254,7 +254,9 @@ service : {
    text, mobileNumber: text, address: AddressInfo, gender: Gender,
    aadhaarPhotoUrl: text, photoUrl: text, voterIdNumber: text) -> (Result);
   removeBiometricCredential: () -> (Result);
+  requestAadhaarOTP: (aadhaarNumber: text, mobileNumber: text) -> (Result);
   startVoting: (electionId: nat) -> (Result);
+  verifyAadhaarOTP: (aadhaarNumber: text, enteredOTP: text) -> (Result);
   verifyBiometricCredential: (request: BiometricVerificationRequest) ->
    (Result_1);
   verifyCitizen: (citizenPrincipal: principal, approve: bool, voterIdNumber:

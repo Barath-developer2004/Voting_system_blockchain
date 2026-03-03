@@ -262,4 +262,14 @@ module {
         authenticatorData : Text;
         signature : Text;
     };
+
+    // Aadhaar OTP verification record
+    public type AadhaarOTPRecord = {
+        aadhaarNumber : Text;
+        otp : Text;
+        mobileNumber : Text;
+        generatedAt : Time.Time;
+        verified : Bool;
+        attempts : Nat;
+    };
 }

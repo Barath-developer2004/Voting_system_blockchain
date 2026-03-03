@@ -33,10 +33,14 @@ persistent actor VotingSystem {
     private stable var adminsArray : [Principal] = [];
     private stable var aadhaarRegistry : [Text] = [];
     private stable var biometricsEntries : [(Principal, BiometricCredential)] = [];
+    private stable var aadhaarOTPEntries : [(Text, Types.AadhaarOTPRecord)] = [];
     
     private stable var nextElectionId : Nat = 1;
     private stable var nextCandidateId : Nat = 1;
     private stable var initialized : Bool = false;
+
+    // The deployer's Principal — set once during initialize()
+    // No hardcoded admin. Whoever calls initialize() first becomes the admin.
 
     // Helper: Hash function for Nat
     private func natHash(n : Nat) : Hash.Hash {
@@ -51,6 +55,7 @@ persistent actor VotingSystem {
     private transient var auditLogs : [AuditLog] = [];
     private transient var admins : [Principal] = [];
     private transient var biometrics = HashMap.HashMap<Principal, BiometricCredential>(10, Principal.equal, Principal.hash);
+    private transient var aadhaarOTPs = HashMap.HashMap<Text, Types.AadhaarOTPRecord>(10, Text.equal, Text.hash);
 
     // System initialization
     system func preupgrade() {
@@ -61,6 +66,7 @@ persistent actor VotingSystem {
         auditLogsArray := auditLogs;
         adminsArray := admins;
         biometricsEntries := Iter.toArray(biometrics.entries());
+        aadhaarOTPEntries := Iter.toArray(aadhaarOTPs.entries());
     };
 
     system func postupgrade() {
@@ -70,25 +76,65 @@ persistent actor VotingSystem {
         votes := votesArray;
         auditLogs := auditLogsArray;
         admins := adminsArray;
+        initialized := Array.size(admins) > 0;
         biometrics := HashMap.fromIter<Principal, BiometricCredential>(biometricsEntries.vals(), 10, Principal.equal, Principal.hash);
+        aadhaarOTPs := HashMap.fromIter<Text, Types.AadhaarOTPRecord>(aadhaarOTPEntries.vals(), 10, Text.equal, Text.hash);
         
         citizensEntries := [];
         electionsEntries := [];
         candidatesEntries := [];
         biometricsEntries := [];
+        aadhaarOTPEntries := [];
     };
 
-    // Initialize system with first admin
+    // ============ SYSTEM INITIALIZATION ============
+    // The FIRST person to call initialize() becomes the admin.
+    // After that, no one else can call it.
+    //
+    // Usage after deploy:
+    //   dfx canister call voting_backend initialize
+    //
+    // To add your browser identity as admin too:
+    //   dfx canister call voting_backend addAdminByInitializer '(principal "<your-browser-principal>")'
+
     public shared(msg) func initialize() : async Result<Text, Text> {
-        if (initialized) {
-            return #err("System already initialized");
+        if (initialized and Array.size(admins) > 0) {
+            return #ok("System already initialized. Admin exists: " # Principal.toText(admins[0]))
         };
-        
+
+        // First caller becomes the admin
         admins := [msg.caller];
         initialized := true;
-        
-        logAudit(msg.caller, "SYSTEM_INITIALIZED", null, "First admin set");
-        #ok("System initialized. You are now Super Admin.")
+
+        logAudit(msg.caller, "SYSTEM_INITIALIZED", ?msg.caller, "First admin set via initialize()");
+
+        #ok("You are now the admin. Your Principal: " # Principal.toText(msg.caller))
+    };
+
+    // Allow the initial admin (deployer) to add another admin.
+    // Useful for adding your browser Internet Identity principal as admin.
+    //
+    // Usage:
+    //   dfx canister call voting_backend addAdminByInitializer '(principal "xxxxx-xxxxx-...")'
+    public shared(msg) func addAdminByInitializer(newAdmin : Principal) : async Result<Text, Text> {
+        if (not initialized or Array.size(admins) == 0) {
+            return #err("System not initialized. Call initialize() first.");
+        };
+
+        // Only the first admin (initializer/deployer) can use this function
+        if (not Principal.equal(msg.caller, admins[0])) {
+            return #err("Only the initial deployer can use this function")
+        };
+
+        if (isAdmin(newAdmin)) {
+            return #err("This principal is already an admin")
+        };
+
+        admins := Array.append(admins, [newAdmin]);
+
+        logAudit(msg.caller, "ADMIN_ADDED_BY_DEPLOYER", ?newAdmin, "Added via addAdminByInitializer");
+
+        #ok("Admin added successfully. Principal: " # Principal.toText(newAdmin))
     };
 
     // Helper: Check if caller is admin
@@ -136,6 +182,27 @@ persistent actor VotingSystem {
         })
     };
 
+    // Helper: Get current date from Time.now() (no hardcoded values)
+    private func getCurrentDate() : (Nat, Nat, Nat) {
+        let now = Time.now();
+        let secondsSinceEpoch = Int.abs(now) / 1_000_000_000;
+        let totalDays = secondsSinceEpoch / 86400;
+
+        // Civil date from days (Howard Hinnant's algorithm)
+        let z = totalDays + 719468;
+        let era = z / 146097;
+        let doe = z - era * 146097;
+        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if (mp < 10) { mp + 3 } else { mp - 9 };
+        let year = if (m <= 2) { y + 1 } else { y };
+
+        (year, m, d)
+    };
+
     private func calculateAge(dob : Text) : Nat {
         // Age calculation with proper date comparison
         // Format accepted: "DD-MM-YYYY" or "DD/MM/YYYY"
@@ -144,9 +211,8 @@ persistent actor VotingSystem {
         if (Array.size(parts) == 3) {
             switch (Nat.fromText(parts[0]), Nat.fromText(parts[1]), Nat.fromText(parts[2])) {
                 case (?day, ?month, ?year) {
-                    let currentYear = 2026;
-                    let currentMonth = 2;  // February
-                    let currentDay = 11;
+                    // Dynamically get current date from system time
+                    let (currentYear, currentMonth, currentDay) = getCurrentDate();
                     
                     if (year > currentYear) { return 0 };
                     
@@ -190,6 +256,130 @@ persistent actor VotingSystem {
         auditLogs := Array.append(auditLogs, [log]);
     };
 
+    // ============ AADHAAR OTP VERIFICATION (SIMULATED) ============
+    // In production, this would integrate with UIDAI's Aadhaar e-KYC API.
+    // For demo/academic purposes, we simulate the OTP flow to demonstrate
+    // the verification architecture.
+
+    // Helper: Generate a deterministic 6-digit OTP from Aadhaar + timestamp
+    private func generateOTP(aadhaarNumber : Text) : Text {
+        let seed = Text.hash(aadhaarNumber # Int.toText(Time.now()));
+        let otp = Nat32.toNat(seed) % 1000000;
+        let otpText = Nat.toText(otp);
+        // Pad to 6 digits
+        let padding = 6 - Text.size(otpText);
+        var padded = otpText;
+        var i = 0;
+        while (i < padding) {
+            padded := "0" # padded;
+            i += 1;
+        };
+        padded
+    };
+
+    // Request Aadhaar OTP (simulated - returns OTP for demo)
+    public shared(msg) func requestAadhaarOTP(
+        aadhaarNumber : Text,
+        mobileNumber : Text
+    ) : async Result<Text, Text> {
+        // Validate Aadhaar format
+        if (Text.size(aadhaarNumber) != 12) {
+            return #err("Invalid Aadhaar number format. Must be 12 digits.");
+        };
+
+        // Validate mobile
+        if (not isValidMobile(mobileNumber)) {
+            return #err("Invalid mobile number");
+        };
+
+        // Check if Aadhaar already registered
+        if (aadhaarExists(aadhaarNumber)) {
+            return #err("This Aadhaar number is already registered in the system!");
+        };
+
+        // Generate OTP
+        let otp = generateOTP(aadhaarNumber);
+
+        // Store OTP record
+        let otpRecord : Types.AadhaarOTPRecord = {
+            aadhaarNumber = aadhaarNumber;
+            otp = otp;
+            mobileNumber = mobileNumber;
+            generatedAt = Time.now();
+            verified = false;
+            attempts = 0;
+        };
+        aadhaarOTPs.put(aadhaarNumber, otpRecord);
+
+        let firstChar : Char = switch (Text.toIter(aadhaarNumber).next()) { case (?ch) ch; case null 'X' };
+        logAudit(msg.caller, "AADHAAR_OTP_REQUESTED", null, "OTP sent for Aadhaar: " # Text.fromChar(firstChar) # "***********");
+
+        // In production: send OTP via SMS using UIDAI API
+        // For demo: return the OTP directly so the user can see it
+        #ok("OTP sent to mobile number ending in " # mobileNumber # ". [DEMO MODE - OTP: " # otp # "]")
+    };
+
+    // Verify Aadhaar OTP
+    public shared(msg) func verifyAadhaarOTP(
+        aadhaarNumber : Text,
+        enteredOTP : Text
+    ) : async Result<Text, Text> {
+        switch (aadhaarOTPs.get(aadhaarNumber)) {
+            case null {
+                return #err("No OTP request found. Please request an OTP first.");
+            };
+            case (?otpRecord) {
+                // Check if already verified
+                if (otpRecord.verified) {
+                    return #ok("Aadhaar already verified");
+                };
+
+                // Check max attempts (prevent brute force)
+                if (otpRecord.attempts >= 5) {
+                    aadhaarOTPs.delete(aadhaarNumber);
+                    return #err("Too many failed attempts. Please request a new OTP.");
+                };
+
+                // Check OTP expiry (5 minutes = 5 * 60 * 1_000_000_000 nanoseconds)
+                let fiveMinutes : Int = 5 * 60 * 1_000_000_000;
+                if (Time.now() - otpRecord.generatedAt > fiveMinutes) {
+                    aadhaarOTPs.delete(aadhaarNumber);
+                    return #err("OTP has expired. Please request a new one.");
+                };
+
+                // Verify OTP
+                if (enteredOTP != otpRecord.otp) {
+                    // Increment attempts
+                    let updated : Types.AadhaarOTPRecord = {
+                        aadhaarNumber = otpRecord.aadhaarNumber;
+                        otp = otpRecord.otp;
+                        mobileNumber = otpRecord.mobileNumber;
+                        generatedAt = otpRecord.generatedAt;
+                        verified = false;
+                        attempts = otpRecord.attempts + 1;
+                    };
+                    aadhaarOTPs.put(aadhaarNumber, updated);
+                    return #err("Invalid OTP. " # Nat.toText(4 - otpRecord.attempts) # " attempts remaining.");
+                };
+
+                // Mark as verified
+                let verified : Types.AadhaarOTPRecord = {
+                    aadhaarNumber = otpRecord.aadhaarNumber;
+                    otp = otpRecord.otp;
+                    mobileNumber = otpRecord.mobileNumber;
+                    generatedAt = otpRecord.generatedAt;
+                    verified = true;
+                    attempts = otpRecord.attempts;
+                };
+                aadhaarOTPs.put(aadhaarNumber, verified);
+
+                logAudit(msg.caller, "AADHAAR_OTP_VERIFIED", null, "Aadhaar verified via OTP");
+
+                #ok("Aadhaar number verified successfully!")
+            };
+        }
+    };
+
     // ============ CITIZEN MANAGEMENT ============
 
     // Register new citizen
@@ -225,6 +415,22 @@ persistent actor VotingSystem {
         // Check for duplicate Aadhaar
         if (aadhaarExists(aadhaarNumber)) {
             return #err("This Aadhaar number is already registered!");
+        };
+
+        // SECURITY CHECK: Verify Aadhaar OTP was completed
+        switch (aadhaarOTPs.get(aadhaarNumber)) {
+            case null {
+                return #err("Aadhaar number not verified. Please complete OTP verification first.");
+            };
+            case (?otpRecord) {
+                if (not otpRecord.verified) {
+                    return #err("Aadhaar OTP verification incomplete. Please verify your OTP first.");
+                };
+                // Verify mobile number matches OTP request
+                if (otpRecord.mobileNumber != mobileNumber) {
+                    return #err("Mobile number does not match the one used for Aadhaar OTP verification.");
+                };
+            };
         };
 
         // Calculate age
@@ -536,6 +742,18 @@ persistent actor VotingSystem {
         // SECURITY CHECK 3: Must be eligible (18+)
         if (not citizen.isEligible) {
             return #err("You are not eligible to vote");
+        };
+
+        // SECURITY CHECK 3.5: Must have biometric enrolled (multi-factor auth)
+        switch (biometrics.get(voterPrincipal)) {
+            case null {
+                return #err("Biometric verification required. Please enroll your fingerprint before voting (Dashboard → Settings).");
+            };
+            case (?bioCred) {
+                if (not bioCred.isActive) {
+                    return #err("Your biometric credential is inactive. Please re-enroll.");
+                };
+            };
         };
 
         // SECURITY CHECK 4: Get election

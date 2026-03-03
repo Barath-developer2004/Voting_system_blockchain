@@ -204,7 +204,9 @@ export interface _SERVICE {
     Result
   >,
   'removeBiometricCredential' : ActorMethod<[], Result>,
+  'requestAadhaarOTP' : ActorMethod<[string, string], Result>,
   'startVoting' : ActorMethod<[bigint], Result>,
+  'verifyAadhaarOTP' : ActorMethod<[string, string], Result>,
   'verifyBiometricCredential' : ActorMethod<
     [BiometricVerificationRequest],
     Result_1

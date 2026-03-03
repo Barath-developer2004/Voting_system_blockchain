@@ -2,16 +2,33 @@ import { Actor, HttpAgent } from '@dfinity/agent';
 import { AuthClient } from '@dfinity/auth-client';
 import { idlFactory } from './declarations/voting_backend';
 
-const isLocal = process.env.DFX_NETWORK !== 'ic';
+// ============ CONFIGURATION ============
+// Network detection: 'local' for development, 'ic' for mainnet
+const network = process.env.DFX_NETWORK || 'local';
+const isLocal = network !== 'ic';
 const host = isLocal ? 'http://localhost:4943' : 'https://ic0.app';
 
 let authClient = null;
 let actor = null;
 
-// Get canister ID from environment or use local
-const canisterId = process.env.CANISTER_ID_VOTING_BACKEND ||
-    process.env.VOTING_BACKEND_CANISTER_ID ||
-    'u6s2n-gx777-77774-qaaba-cai'; // Default local canister ID
+// Backend canister ID (from dfx deploy output)
+const canisterId = process.env.CANISTER_ID_VOTING_BACKEND || 'uzt4z-lp777-77774-qaabq-cai';
+
+// Internet Identity canister ID (from dfx deploy output)
+const iiCanisterId = process.env.CANISTER_ID_INTERNET_IDENTITY || 'uxrrr-q7777-77774-qaaaq-cai';
+
+// Build the Identity Provider URL
+// Local:   http://<ii-canister-id>.localhost:4943
+// Mainnet: https://identity.ic0.app
+const identityProvider = isLocal
+    ? `http://${iiCanisterId}.localhost:4943`
+    : 'https://identity.ic0.app';
+
+console.log('🌐 Network:', network);
+console.log('🔗 Backend Canister:', canisterId);
+console.log('🔑 Identity Provider:', identityProvider);
+
+// ============ AUTHENTICATION ============
 
 export const initAuth = async () => {
     authClient = await AuthClient.create();
@@ -26,19 +43,15 @@ export const initAuth = async () => {
 export const login = async () => {
     return new Promise(async (resolve, reject) => {
         try {
-            console.log('🔐 Starting login process...');
+            console.log('🔐 Starting Internet Identity login...');
 
             if (!authClient) {
-                console.log('Creating auth client...');
                 authClient = await AuthClient.create();
             }
 
-            const identityProvider = isLocal
-                ? `http://uxrrr-q7777-77774-qaaaq-cai.localhost:4943`
-                : 'https://identity.ic0.app';
-
-            console.log('✅ Identity Provider:', identityProvider);
-            console.log('🌐 Opening authentication window...');
+            console.log('🌐 Opening Internet Identity popup...');
+            console.log('   → New users: Click "Create New" to get an Anchor Number');
+            console.log('   → Returning users: Enter your Anchor Number');
 
             authClient.login({
                 identityProvider,
@@ -49,13 +62,14 @@ export const login = async () => {
                 `,
                 maxTimeToLive: BigInt(7 * 24 * 60 * 60 * 1000 * 1000 * 1000), // 7 days
                 onSuccess: async () => {
-                    console.log('✅ Login successful!');
+                    console.log('✅ Internet Identity authentication successful!');
                     try {
                         await setupActor();
-                        console.log('✅ Actor setup complete');
+                        const principal = authClient.getIdentity().getPrincipal().toString();
+                        console.log('✅ Logged in as:', principal);
                         resolve(true);
                     } catch (err) {
-                        console.error('❌ Error setting up actor:', err);
+                        console.error('❌ Error setting up connection:', err);
                         reject(err);
                     }
                 },
@@ -64,8 +78,6 @@ export const login = async () => {
                     reject(error);
                 },
             });
-
-            console.log('⏳ Waiting for authentication...');
         } catch (error) {
             console.error('❌ Login initialization error:', error);
             reject(error);
@@ -131,6 +143,34 @@ export const getActor = () => {
 };
 
 // Voting System API
+
+// ============ AADHAAR OTP VERIFICATION ============
+
+export const requestAadhaarOTP = async (aadhaarNumber, mobileNumber) => {
+    try {
+        console.log('\ud83d\udce8 Requesting Aadhaar OTP...');
+        const actor = getActor();
+        const result = await actor.requestAadhaarOTP(aadhaarNumber, mobileNumber);
+        console.log('\ud83d\udce8 OTP request result:', result);
+        return result;
+    } catch (error) {
+        console.error('\u274c OTP request error:', error);
+        throw error;
+    }
+};
+
+export const verifyAadhaarOTP = async (aadhaarNumber, otp) => {
+    try {
+        console.log('\ud83d\udd10 Verifying Aadhaar OTP...');
+        const actor = getActor();
+        const result = await actor.verifyAadhaarOTP(aadhaarNumber, otp);
+        console.log('\ud83d\udd10 OTP verify result:', result);
+        return result;
+    } catch (error) {
+        console.error('\u274c OTP verify error:', error);
+        throw error;
+    }
+};
 
 export const initializeSystem = async () => {
     const actor = getActor();
@@ -258,6 +298,14 @@ export const getAuditLogs = async (limit) => {
     return await actor.getAuditLogs(limit);
 };
 
+// ============ ADMIN SETUP (SELF-SERVICE) ============
+// Calls initialize() on the backend — the first caller becomes admin.
+// This allows a client to claim admin from the browser without using CLI.
+export const claimAdmin = async () => {
+    const actor = getActor();
+    return await actor.initialize();
+};
+
 export const getSystemInfo = async () => {
     try {
         // Try with authenticated actor first
@@ -287,6 +335,17 @@ export const getSystemInfo = async () => {
 
 // ============ BIOMETRIC AUTHENTICATION ============
 
+// Helper: Get per-user localStorage key
+const getBiometricKey = (suffix) => {
+    try {
+        const identity = authClient?.getIdentity();
+        const principalId = identity ? identity.getPrincipal().toString() : 'anonymous';
+        return `biometric_${suffix}_${principalId}`;
+    } catch {
+        return `biometric_${suffix}_anonymous`;
+    }
+};
+
 export const enrollBiometricCredential = async (credentialData) => {
     try {
         console.log('🔐 Enrolling biometric credential on blockchain...');
@@ -306,8 +365,8 @@ export const enrollBiometricCredential = async (credentialData) => {
         if (result.ok) {
             console.log('✅ Biometric enrolled on blockchain:', result.ok);
 
-            // Also store locally for quick access
-            localStorage.setItem('biometric_session', JSON.stringify({
+            // Store per-user biometric session (keyed by principal)
+            localStorage.setItem(getBiometricKey('session'), JSON.stringify({
                 verified: true,
                 timestamp: Date.now(),
                 credentialId: credentialData.id
@@ -344,8 +403,8 @@ export const verifyBiometricCredential = async (credentialData) => {
         if (result.ok) {
             console.log('✅ Biometric verification successful on blockchain');
 
-            // Store biometric session
-            localStorage.setItem('biometric_session', JSON.stringify({
+            // Store per-user biometric session
+            localStorage.setItem(getBiometricKey('session'), JSON.stringify({
                 verified: true,
                 timestamp: Date.now(),
                 credentialId: credentialData.credentialId
@@ -391,7 +450,9 @@ export const removeBiometricCredential = async () => {
         const result = await actor.removeBiometricCredential();
 
         if (result.ok) {
-            localStorage.removeItem('biometric_session');
+            localStorage.removeItem(getBiometricKey('session'));
+            localStorage.removeItem(getBiometricKey('credential'));
+            localStorage.removeItem(getBiometricKey('enrolled'));
         }
 
         return result;
@@ -403,6 +464,10 @@ export const removeBiometricCredential = async () => {
 
 export const isBiometricEnrolled = () => {
     try {
+        // Check per-user key first, fall back to legacy key
+        const perUserKey = getBiometricKey('enrolled');
+        if (localStorage.getItem(perUserKey) === 'true') return true;
+        // Legacy fallback
         return localStorage.getItem('biometric_enrolled') === 'true';
     } catch (error) {
         console.error('Error checking biometric enrollment:', error);
@@ -412,14 +477,14 @@ export const isBiometricEnrolled = () => {
 
 export const getBiometricSession = () => {
     try {
-        const session = localStorage.getItem('biometric_session');
+        const session = localStorage.getItem(getBiometricKey('session'));
         if (!session) return null;
 
         const sessionData = JSON.parse(session);
         // Check if session is still valid (24 hours)
         const maxAge = 24 * 60 * 60 * 1000;
         if (Date.now() - sessionData.timestamp > maxAge) {
-            localStorage.removeItem('biometric_session');
+            localStorage.removeItem(getBiometricKey('session'));
             return null;
         }
 
@@ -432,7 +497,7 @@ export const getBiometricSession = () => {
 
 export const clearBiometricSession = () => {
     try {
-        localStorage.removeItem('biometric_session');
+        localStorage.removeItem(getBiometricKey('session'));
         console.log('✅ Biometric session cleared');
     } catch (error) {
         console.error('Error clearing biometric session:', error);

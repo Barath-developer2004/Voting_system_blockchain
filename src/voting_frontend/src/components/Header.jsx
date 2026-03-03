@@ -1,105 +1,187 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Vote, LayoutDashboard, Landmark, Settings, LogOut, LogIn, UserPlus, Shield, User, ChevronDown, Menu, X, Copy, Check } from 'lucide-react';
 
 function Header({ isAuthenticated, isAdmin, hasCitizenProfile, viewAs, setViewAs, principal, onLogin, onLogout, currentView, setCurrentView }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showFullPrincipal, setShowFullPrincipal] = useState(false);
+
+  const copyPrincipal = async () => {
+    try {
+      await navigator.clipboard.writeText(principal);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+      const ta = document.createElement('textarea');
+      ta.value = principal;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const NavButton = ({ view, icon: Icon, label, active }) => (
+    <button
+      onClick={() => { setCurrentView(view); setMobileMenuOpen(false); }}
+      className={`relative flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+        active
+          ? 'bg-brand-600/15 text-brand-400'
+          : 'text-surface-400 hover:text-surface-200 hover:bg-surface-800/60'
+      }`}
+    >
+      <Icon size={16} strokeWidth={active ? 2.5 : 2} />
+      <span>{label}</span>
+      {active && (
+        <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-brand-500 rounded-full" />
+      )}
+    </button>
+  );
+
   return (
-    <header className="bg-slate-800/80 backdrop-blur-md shadow-2xl border-b border-slate-700/50">
-      <div className="container mx-auto px-6 py-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-6">
-            <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 cursor-pointer hover:scale-105 transition-transform duration-300 drop-shadow-lg" onClick={() => setCurrentView('home')}>
-              🗳️ Blockchain Voting
-            </h1>
-            {isAuthenticated && (
-              <nav className="flex space-x-3 ml-8">
-                <button
-                  onClick={() => setCurrentView('dashboard')}
-                  className={`px-6 py-2.5 rounded-xl font-semibold transition-all duration-300 ${
-                    currentView === 'dashboard'
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg shadow-blue-500/50 transform scale-105'
-                      : 'text-slate-300 hover:bg-slate-700/50 border border-slate-700'
-                  }`}
-                >
-                  📊 Dashboard
-                </button>
-                <button
-                  onClick={() => setCurrentView('elections')}
-                  className={`px-6 py-2.5 rounded-xl font-semibold transition-all duration-300 ${
-                    currentView === 'elections'
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg shadow-blue-500/50 transform scale-105'
-                      : 'text-slate-300 hover:bg-slate-700/50 border border-slate-700'
-                  }`}
-                >
-                  🎯 Elections
-                </button>
-              </nav>
-            )}
-          </div>
-          
-          <div className="flex items-center space-x-4">
+    <header className="sticky top-0 z-50 glass border-b border-surface-700/30">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="flex items-center justify-between h-16">
+          {/* Logo */}
+          <button
+            onClick={() => setCurrentView('home')}
+            className="flex items-center gap-2.5 group"
+          >
+            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-brand-600 shadow-glow-sm group-hover:shadow-glow transition-shadow duration-300">
+              <Vote size={18} className="text-white" strokeWidth={2.5} />
+            </div>
+            <div className="hidden sm:block">
+              <span className="text-base font-bold text-white tracking-tight">VoteChain</span>
+              <span className="text-[10px] font-medium text-surface-500 block -mt-0.5 tracking-widest uppercase">on ICP</span>
+            </div>
+          </button>
+
+          {/* Center Nav */}
+          {isAuthenticated && (
+            <nav className="hidden md:flex items-center gap-1 bg-surface-900/40 rounded-xl px-1.5 py-1 border border-surface-700/30">
+              <NavButton view="dashboard" icon={LayoutDashboard} label="Dashboard" active={currentView === 'dashboard'} />
+              <NavButton view="elections" icon={Landmark} label="Elections" active={currentView === 'elections'} />
+              <NavButton view="settings" icon={Settings} label="Settings" active={currentView === 'settings'} />
+            </nav>
+          )}
+
+          {/* Right side */}
+          <div className="flex items-center gap-3">
             {isAuthenticated && (
               <>
+                {/* View-as toggle for admin with citizen profile */}
                 {isAdmin && hasCitizenProfile && currentView === 'dashboard' && (
-                  <div className="flex items-center space-x-2 bg-slate-700/50 backdrop-blur-sm px-3 py-2 rounded-xl border border-slate-600">
-                    <span className="text-xs text-slate-400">View as:</span>
+                  <div className="hidden lg:flex items-center gap-1 bg-surface-900/40 rounded-lg px-1 py-0.5 border border-surface-700/30">
                     <button
                       onClick={() => setViewAs('admin')}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
                         viewAs !== 'voter'
-                          ? 'bg-amber-500 text-white'
-                          : 'text-slate-300 hover:bg-slate-600'
+                          ? 'bg-warning-500/15 text-warning-400'
+                          : 'text-surface-500 hover:text-surface-300'
                       }`}
                     >
-                      ⭐ Officer
+                      <Shield size={12} /> Officer
                     </button>
                     <button
                       onClick={() => setViewAs('voter')}
-                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
                         viewAs === 'voter'
-                          ? 'bg-blue-500 text-white'
-                          : 'text-slate-300 hover:bg-slate-600'
+                          ? 'bg-brand-500/15 text-brand-400'
+                          : 'text-surface-500 hover:text-surface-300'
                       }`}
                     >
-                      👤 Voter
+                      <User size={12} /> Voter
                     </button>
                   </div>
                 )}
+
+                {/* Admin badge */}
                 {isAdmin && (
-                  <span className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-full text-sm font-bold shadow-lg">
-                    ⭐ Election Officer
+                  <span className="hidden sm:inline-flex badge bg-warning-500/10 text-warning-400 border-warning-500/20">
+                    <Shield size={12} /> Officer
                   </span>
                 )}
-                <div className="text-sm bg-slate-700/50 backdrop-blur-sm px-4 py-2 rounded-xl border border-slate-600">
-                  <p className="font-mono text-blue-400 font-semibold">{principal.substring(0, 10)}...</p>
+
+                {/* Principal chip - click to see full ID & copy */}
+                <div className="relative hidden sm:block">
+                  <button
+                    onClick={() => setShowFullPrincipal(!showFullPrincipal)}
+                    className="flex items-center gap-2 px-3 py-1.5 bg-surface-900/50 rounded-lg border border-surface-700/30 hover:border-brand-500/40 transition-colors cursor-pointer"
+                    title="Click to see full Principal ID"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-success-400 shadow-sm shadow-success-400/50" />
+                    <span className="text-xs font-mono text-surface-400">{principal.substring(0, 8)}…</span>
+                  </button>
+                  
+                  {showFullPrincipal && (
+                    <div className="absolute right-0 top-full mt-2 p-3 bg-surface-900 rounded-xl border border-surface-700/50 shadow-xl z-50 min-w-[340px] animate-fade-in">
+                      <p className="text-[10px] text-surface-500 uppercase tracking-wider mb-1.5">Your Principal ID</p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 text-xs font-mono text-brand-300 bg-surface-800 px-2.5 py-1.5 rounded-lg break-all select-all">
+                          {principal}
+                        </code>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); copyPrincipal(); }}
+                          className="flex-shrink-0 p-1.5 rounded-lg bg-brand-600/20 text-brand-400 hover:bg-brand-600/30 transition-colors"
+                          title="Copy Principal ID"
+                        >
+                          {copied ? <Check size={14} /> : <Copy size={14} />}
+                        </button>
+                      </div>
+                      {copied && (
+                        <p className="text-[10px] text-success-400 mt-1.5">Copied to clipboard!</p>
+                      )}
+                      <p className="text-[10px] text-surface-500 mt-2">This is your unique blockchain identity from Internet Identity.</p>
+                    </div>
+                  )}
                 </div>
-                <button 
-                  onClick={() => setCurrentView('settings')}
-                  className="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700/50 border border-slate-700 hover:border-slate-600 transition-all"
-                  title="Settings"
-                >
-                  ⚙️
+
+                {/* Logout */}
+                <button onClick={onLogout} className="btn-ghost btn-sm gap-1.5">
+                  <LogOut size={14} />
+                  <span className="hidden sm:inline">Logout</span>
                 </button>
               </>
             )}
-            
-            {isAuthenticated ? (
-              <button onClick={onLogout} className="btn btn-outline">
-                🚪 Logout
-              </button>
-            ) : (
-              <div className="flex space-x-2">
-                <button onClick={onLogin} className="btn btn-primary">
-                  🔐 Login with Internet Identity
+
+            {!isAuthenticated && (
+              <div className="flex items-center gap-2">
+                <button onClick={onLogin} className="btn btn-primary btn-sm">
+                  <LogIn size={14} />
+                  <span className="hidden sm:inline">Login</span>
                 </button>
-                <button 
-                  onClick={() => setCurrentView('register')} 
-                  className="btn btn-outline"
-                >
-                  📝 Register
+                <button onClick={() => setCurrentView('register')} className="btn btn-ghost btn-sm">
+                  <UserPlus size={14} />
+                  <span className="hidden sm:inline">Register</span>
                 </button>
               </div>
             )}
+
+            {/* Mobile menu toggle */}
+            {isAuthenticated && (
+              <button
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="md:hidden p-2 text-surface-400 hover:text-white rounded-lg hover:bg-surface-800/60 transition-colors"
+              >
+                {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Mobile menu */}
+        {isAuthenticated && mobileMenuOpen && (
+          <div className="md:hidden py-3 border-t border-surface-700/30 animate-fade-in-down">
+            <div className="flex flex-col gap-1">
+              <NavButton view="dashboard" icon={LayoutDashboard} label="Dashboard" active={currentView === 'dashboard'} />
+              <NavButton view="elections" icon={Landmark} label="Elections" active={currentView === 'elections'} />
+              <NavButton view="settings" icon={Settings} label="Settings" active={currentView === 'settings'} />
+            </div>
+          </div>
+        )}
       </div>
     </header>
   );

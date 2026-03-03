@@ -217,7 +217,9 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'removeBiometricCredential' : IDL.Func([], [Result], []),
+    'requestAadhaarOTP' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
     'startVoting' : IDL.Func([IDL.Nat], [Result], []),
+    'verifyAadhaarOTP' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
     'verifyBiometricCredential' : IDL.Func(
         [BiometricVerificationRequest],
         [Result_1],

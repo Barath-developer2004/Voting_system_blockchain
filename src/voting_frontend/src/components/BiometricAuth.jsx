@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Fingerprint, ShieldCheck, AlertTriangle, Loader2, Trash2, Lock, CheckCircle2, XCircle, Info } from 'lucide-react';
 import * as api from '../service';
 
 function BiometricAuth({ onSuccess, onError }) {
@@ -14,200 +15,94 @@ function BiometricAuth({ onSuccess, onError }) {
 
   const checkBiometricAvailability = async () => {
     try {
-      // Check if WebAuthn is supported
-      if (!window.PublicKeyCredential) {
-        console.warn('❌ WebAuthn not supported on this browser');
-        setIsBiometricAvailable(false);
-        return;
-      }
-
-      // Check if platform authenticator is available (fingerprint, etc.)
+      if (!window.PublicKeyCredential) { setIsBiometricAvailable(false); return; }
       const available = await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      console.log('✅ Biometric availability:', available);
       setIsBiometricAvailable(available);
-    } catch (error) {
-      console.error('❌ Error checking biometric availability:', error);
-      setIsBiometricAvailable(false);
-    }
+    } catch { setIsBiometricAvailable(false); }
   };
 
-  const checkBiometricEnrollment = () => {
-    try {
-      const enrolled = localStorage.getItem('biometric_enrolled') === 'true';
-      setIsEnrolled(enrolled);
-      console.log('📱 Biometric enrolled:', enrolled);
-    } catch (error) {
-      console.error('❌ Error checking enrollment:', error);
-    }
+  const checkBiometricEnrollment = async () => {
+    try { setIsEnrolled(api.isBiometricEnrolled()); } catch {}
   };
 
-  const generateChallenge = () => {
-    return crypto.getRandomValues(new Uint8Array(32));
-  };
+  const generateChallenge = () => crypto.getRandomValues(new Uint8Array(32));
 
   const arrayBufferToBase64 = (buffer) => {
     const bytes = new Uint8Array(buffer);
     let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
     return btoa(binary);
   };
 
   const base64ToArrayBuffer = (base64) => {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes.buffer;
   };
 
   const handleRegisterBiometric = async () => {
     setLoading(true);
     setMessage({ type: '', text: '' });
-
     try {
-      console.log('🔐 Starting biometric registration...');
-
-      // Check authentication first
       const isAuth = await api.isAuthenticated();
-      if (!isAuth) {
-        console.log('🔐 Not authenticated, initiating login...');
-        await api.login();
-      }
-
+      if (!isAuth) await api.login();
       const principal = await api.getPrincipal();
-      console.log('👤 Principal:', principal);
-
-      // Create credential
       const challenge = generateChallenge();
-      // Use localhost for WebAuthn as it doesn't accept IP addresses
       const hostname = window.location.hostname === '127.0.0.1' ? 'localhost' : window.location.hostname;
-      const rp = {
-        name: 'Blockchain Voting System',
-        id: hostname
-      };
 
-      const user = {
-        id: crypto.getRandomValues(new Uint8Array(16)),
-        name: principal,
-        displayName: 'Voter'
-      };
-
-      const pubKeyCredParams = [
-        { alg: -7, type: 'public-key' },  // ES256
-        { alg: -257, type: 'public-key' } // RS256
-      ];
-
-      console.log('📝 Creating credential...');
       const credential = await navigator.credentials.create({
         publicKey: {
-          challenge: challenge,
-          rp: rp,
-          user: user,
-          pubKeyCredParams: pubKeyCredParams,
-          timeout: 60000,
-          userVerification: 'preferred',
-          authenticatorSelection: {
-            authenticatorAttachment: 'platform', // Only platform authenticators (fingerprint, etc.)
-            userVerification: 'preferred',
-            residentKey: 'preferred'
-          },
+          challenge, rp: { name: 'Blockchain Voting System', id: hostname },
+          user: { id: crypto.getRandomValues(new Uint8Array(16)), name: principal, displayName: 'Voter' },
+          pubKeyCredParams: [{ alg: -7, type: 'public-key' }, { alg: -257, type: 'public-key' }],
+          timeout: 60000, userVerification: 'preferred',
+          authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'preferred', residentKey: 'preferred' },
           attestation: 'direct'
         }
       });
+      if (!credential) throw new Error('Failed to create credential');
 
-      if (!credential) {
-        throw new Error('Failed to create credential');
-      }
-
-      console.log('✅ Credential created successfully');
-
-      // Convert credential to base64 strings for transmission
       const credentialData = {
-        id: arrayBufferToBase64(credential.id),
-        rawId: arrayBufferToBase64(credential.rawId),
+        id: arrayBufferToBase64(credential.id), rawId: arrayBufferToBase64(credential.rawId),
         type: credential.type,
-        response: {
-          clientDataJSON: arrayBufferToBase64(credential.response.clientDataJSON),
-          attestationObject: arrayBufferToBase64(credential.response.attestationObject)
-        }
+        response: { clientDataJSON: arrayBufferToBase64(credential.response.clientDataJSON), attestationObject: arrayBufferToBase64(credential.response.attestationObject) }
       };
 
-      // Enroll on blockchain with converted data
-      console.log('📤 Enrolling biometric on blockchain...');
       const enrollResult = await api.enrollBiometricCredential(credentialData);
+      if (!enrollResult.ok) throw new Error(enrollResult.err || 'Failed to enroll on blockchain');
 
-      if (!enrollResult.ok) {
-        throw new Error(enrollResult.err || 'Failed to enroll on blockchain');
-      }
-
-      localStorage.setItem('biometric_credential', JSON.stringify(credentialData));
-      localStorage.setItem('biometric_enrolled', 'true');
-
+      const principalId = await api.getPrincipal();
+      localStorage.setItem(`biometric_credential_${principalId}`, JSON.stringify(credentialData));
+      localStorage.setItem(`biometric_enrolled_${principalId}`, 'true');
       setIsEnrolled(true);
-      setMessage({
-        type: 'success',
-        text: '✅ Biometric registration successful! You can now login with your fingerprint.'
-      });
-
-      console.log('✅ Biometric registration complete');
+      setMessage({ type: 'success', text: 'Biometric registration successful! You can now use your fingerprint.' });
     } catch (error) {
-      console.error('❌ Biometric registration error:', error);
-      setMessage({
-        type: 'error',
-        text: `❌ Registration failed: ${error.message}`
-      });
+      setMessage({ type: 'error', text: `Registration failed: ${error.message}` });
       if (onError) onError(error);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const handleBiometricLogin = async () => {
     setLoading(true);
     setMessage({ type: '', text: '' });
-
     try {
-      console.log('🔐 Starting biometric login...');
-
-      if (!isEnrolled) {
-        throw new Error('Biometric not enrolled. Please register first.');
-      }
-
-      const storedCredential = localStorage.getItem('biometric_credential');
-      if (!storedCredential) {
-        throw new Error('No biometric credential found');
-      }
-
+      if (!isEnrolled) throw new Error('Biometric not enrolled. Please register first.');
+      const principalId = await api.getPrincipal();
+      const storedCredential = localStorage.getItem(`biometric_credential_${principalId}`);
+      if (!storedCredential) throw new Error('No biometric credential found for your account');
       const credentialData = JSON.parse(storedCredential);
       const challenge = generateChallenge();
 
-      console.log('👆 Prompting for fingerprint verification...');
-
       const assertion = await navigator.credentials.get({
         publicKey: {
-          challenge: challenge,
-          allowCredentials: [
-            {
-              type: 'public-key',
-              id: new Uint8Array(base64ToArrayBuffer(credentialData.rawId)),
-              transports: ['internal']
-            }
-          ],
-          timeout: 60000,
-          userVerification: 'preferred'
+          challenge,
+          allowCredentials: [{ type: 'public-key', id: new Uint8Array(base64ToArrayBuffer(credentialData.rawId)), transports: ['internal'] }],
+          timeout: 60000, userVerification: 'preferred'
         }
       });
+      if (!assertion) throw new Error('Biometric verification failed');
 
-      if (!assertion) {
-        throw new Error('Biometric verification failed');
-      }
-
-      console.log('✅ Biometric verified successfully');
-
-      // Verify credential with backend
       const verifyResult = await api.verifyBiometricCredential({
         credentialId: credentialData.id,
         clientDataJSON: arrayBufferToBase64(assertion.response.clientDataJSON),
@@ -216,52 +111,32 @@ function BiometricAuth({ onSuccess, onError }) {
       });
 
       if (verifyResult && verifyResult.ok) {
-        setMessage({
-          type: 'success',
-          text: '✅ Biometric login successful!'
-        });
-        if (onSuccess) {
-          setTimeout(() => onSuccess(), 1000);
-        }
-      } else {
-        throw new Error('Backend verification failed');
-      }
+        setMessage({ type: 'success', text: 'Biometric login successful!' });
+        if (onSuccess) setTimeout(() => onSuccess(), 1000);
+      } else throw new Error('Backend verification failed');
     } catch (error) {
-      console.error('❌ Biometric login error:', error);
-      setMessage({
-        type: 'error',
-        text: `❌ Login failed: ${error.message}`
-      });
+      setMessage({ type: 'error', text: `Login failed: ${error.message}` });
       if (onError) onError(error);
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
-  const handleRemoveBiometric = () => {
+  const handleRemoveBiometric = async () => {
     try {
+      const principalId = await api.getPrincipal();
+      localStorage.removeItem(`biometric_credential_${principalId}`);
+      localStorage.removeItem(`biometric_enrolled_${principalId}`);
       localStorage.removeItem('biometric_credential');
       localStorage.removeItem('biometric_enrolled');
       setIsEnrolled(false);
-      setMessage({
-        type: 'success',
-        text: '✅ Biometric authentication removed'
-      });
-    } catch (error) {
-      console.error('❌ Error removing biometric:', error);
-      setMessage({
-        type: 'error',
-        text: '❌ Failed to remove biometric'
-      });
-    }
+      setMessage({ type: 'success', text: 'Biometric authentication removed' });
+    } catch { setMessage({ type: 'error', text: 'Failed to remove biometric' }); }
   };
 
   if (!isBiometricAvailable) {
     return (
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
-        <p className="text-sm text-yellow-800">
-          ⚠️ Biometric authentication is not available on this device.
-        </p>
+      <div className="flex items-center gap-3 p-4 rounded-xl bg-warning-500/5 border border-warning-500/15">
+        <AlertTriangle size={18} className="text-warning-400 flex-shrink-0" />
+        <p className="text-sm text-warning-400">Biometric authentication is not available on this device.</p>
       </div>
     );
   }
@@ -269,68 +144,61 @@ function BiometricAuth({ onSuccess, onError }) {
   return (
     <div className="space-y-4">
       {message.text && (
-        <div
-          className={`p-4 rounded-lg ${
-            message.type === 'success'
-              ? 'bg-green-50 border border-green-200 text-green-800'
-              : 'bg-red-50 border border-red-200 text-red-800'
-          }`}
-        >
+        <div className={`flex items-center gap-3 p-4 rounded-xl text-sm font-medium ${
+          message.type === 'success' ? 'bg-success-500/5 border border-success-500/15 text-success-400' :
+          'bg-danger-500/5 border border-danger-500/15 text-danger-400'
+        }`}>
+          {message.type === 'success' ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
           {message.text}
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-lg p-6 space-y-4">
+      <div className="rounded-2xl border border-surface-700/40 bg-surface-800/30 p-6 space-y-5">
         {!isEnrolled ? (
           <>
             <div className="text-center">
-              <div className="text-4xl mb-2">👆</div>
-              <h3 className="font-bold text-lg mb-2">Register Fingerprint</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Enable biometric authentication for faster and more secure login.
-              </p>
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-500/10 mb-4">
+                <Fingerprint size={30} className="text-brand-400" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-1">Register Fingerprint</h3>
+              <p className="text-sm text-surface-400 max-w-xs mx-auto">Enable biometric authentication for faster and more secure login.</p>
             </div>
-            <button
-              onClick={handleRegisterBiometric}
-              disabled={loading}
-              className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-all duration-300"
-            >
-              {loading ? '⏳ Registering...' : '📱 Register Fingerprint'}
+            <button onClick={handleRegisterBiometric} disabled={loading} className="btn btn-primary w-full group">
+              {loading ? <><Loader2 size={16} className="animate-spin" /> Registering...</> :
+                <><Fingerprint size={16} className="group-hover:scale-110 transition-transform" /> Register Fingerprint</>}
             </button>
           </>
         ) : (
           <>
             <div className="text-center">
-              <div className="text-4xl mb-2">✅</div>
-              <h3 className="font-bold text-lg mb-2">Biometric Registered</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Your fingerprint is enrolled. Use it to login securely.
-              </p>
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-success-500/10 mb-4">
+                <ShieldCheck size={30} className="text-success-400" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-1">Biometric Registered</h3>
+              <p className="text-sm text-surface-400 max-w-xs mx-auto">Your fingerprint is enrolled. Use it to login securely.</p>
             </div>
-            <button
-              onClick={handleBiometricLogin}
-              disabled={loading}
-              className="w-full px-6 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-all duration-300 flex items-center justify-center gap-2"
-            >
-              {loading ? '⏳ Verifying...' : '👆 Login with Fingerprint'}
+            <button onClick={handleBiometricLogin} disabled={loading}
+              className="btn w-full bg-success-500/10 text-success-400 border border-success-500/20 hover:bg-success-500/20 transition-colors">
+              {loading ? <><Loader2 size={16} className="animate-spin" /> Verifying...</> :
+                <><Fingerprint size={16} /> Login with Fingerprint</>}
             </button>
-            <button
-              onClick={handleRemoveBiometric}
-              className="w-full px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded-lg transition-all duration-300"
-            >
-              🗑️ Remove Fingerprint
+            <button onClick={handleRemoveBiometric} className="btn btn-danger w-full">
+              <Trash2 size={14} /> Remove Fingerprint
             </button>
           </>
         )}
       </div>
 
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
-        <p className="font-semibold mb-2">🔒 Security Note:</p>
-        <ul className="list-disc list-inside space-y-1 text-xs">
-          <li>Your fingerprint data never leaves your device</li>
-          <li>Uses WebAuthn standard for maximum security</li>
-          <li>Encrypted end-to-end communication</li>
-          <li>Can be managed from Settings</li>
+      <div className="rounded-xl bg-brand-500/5 border border-brand-500/10 p-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Lock size={14} className="text-brand-400" />
+          <p className="text-xs font-semibold text-brand-400">Security Note</p>
+        </div>
+        <ul className="space-y-1.5 text-xs text-surface-400">
+          <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-brand-500/40 mt-1.5 flex-shrink-0" />Your fingerprint data never leaves your device</li>
+          <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-brand-500/40 mt-1.5 flex-shrink-0" />Uses WebAuthn standard for maximum security</li>
+          <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-brand-500/40 mt-1.5 flex-shrink-0" />Encrypted end-to-end communication</li>
+          <li className="flex items-start gap-2"><span className="w-1 h-1 rounded-full bg-brand-500/40 mt-1.5 flex-shrink-0" />Can be managed from Settings</li>
         </ul>
       </div>
     </div>

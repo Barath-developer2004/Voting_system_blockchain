@@ -1,222 +1,177 @@
 import React, { useState } from 'react';
+import { Fingerprint, X, Shield, CheckCircle2, XCircle, AlertTriangle, Loader2, Lock, Blocks, CreditCard } from 'lucide-react';
 import * as api from '../service';
 
 function BiometricVerificationModal({ onVerified, onCancel, candidateName, electionTitle }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
-  const [isEnrolled, setIsEnrolled] = useState(api.isBiometricEnrolled());
+  const [isEnrolled] = useState(api.isBiometricEnrolled());
 
-  const generateChallenge = () => {
-    return crypto.getRandomValues(new Uint8Array(32));
-  };
+  const generateChallenge = () => crypto.getRandomValues(new Uint8Array(32));
 
   const arrayBufferToBase64 = (buffer) => {
     const bytes = new Uint8Array(buffer);
     let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
     return btoa(binary);
   };
 
   const base64ToArrayBuffer = (base64) => {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     return bytes.buffer;
   };
 
   const handleBiometricVerification = async () => {
     setLoading(true);
     setMessage({ type: '', text: '' });
-
     try {
       if (!isEnrolled) {
-        setMessage({
-          type: 'error',
-          text: '❌ Biometric not enrolled. Please register your fingerprint first.'
-        });
+        setMessage({ type: 'error', text: 'Biometric not enrolled. Please register your fingerprint first.' });
         setLoading(false);
         return;
       }
 
-      console.log('👆 Prompting for fingerprint verification before voting...');
-
-      const storedCredential = localStorage.getItem('biometric_credential');
+      const principalId = await api.getPrincipal();
+      let storedCredential = localStorage.getItem(`biometric_credential_${principalId}`);
       if (!storedCredential) {
-        throw new Error('Biometric credential not found');
+        const legacyCredential = localStorage.getItem('biometric_credential');
+        if (!legacyCredential) throw new Error('Biometric credential not found. Please register your fingerprint first.');
+        localStorage.setItem(`biometric_credential_${principalId}`, legacyCredential);
+        storedCredential = legacyCredential;
       }
 
       const credentialData = JSON.parse(storedCredential);
       const challenge = generateChallenge();
-
-      setMessage({
-        type: 'info',
-        text: '👆 Place your finger on the scanner...'
-      });
+      setMessage({ type: 'info', text: 'Place your finger on the scanner...' });
 
       const assertion = await navigator.credentials.get({
         publicKey: {
-          challenge: challenge,
-          allowCredentials: [
-            {
-              type: 'public-key',
-              id: new Uint8Array(base64ToArrayBuffer(credentialData.rawId)),
-              transports: ['internal']
-            }
-          ],
-          timeout: 60000,
-          userVerification: 'preferred'
+          challenge,
+          allowCredentials: [{ type: 'public-key', id: new Uint8Array(base64ToArrayBuffer(credentialData.rawId)), transports: ['internal'] }],
+          timeout: 60000, userVerification: 'preferred'
         }
       });
+      if (!assertion) throw new Error('Fingerprint verification cancelled');
 
-      if (!assertion) {
-        throw new Error('Fingerprint verification cancelled');
-      }
-
-      console.log('✅ Fingerprint verified successfully');
-
-      // Update biometric session
-      localStorage.setItem('biometric_session', JSON.stringify({
-        verified: true,
-        timestamp: Date.now(),
-        credentialId: credentialData.id
-      }));
-
-      setMessage({
-        type: 'success',
-        text: '✅ Fingerprint verified! Proceeding with vote...'
+      const verifyResult = await api.verifyBiometricCredential({
+        credentialId: credentialData.id,
+        clientDataJSON: arrayBufferToBase64(assertion.response.clientDataJSON),
+        authenticatorData: arrayBufferToBase64(assertion.response.authenticatorData),
+        signature: arrayBufferToBase64(assertion.response.signature)
       });
+      if (!verifyResult || !verifyResult.ok) throw new Error('Blockchain verification failed.');
 
-      // Call onVerified callback after short delay
-      setTimeout(() => {
-        onVerified();
-      }, 1000);
-
+      localStorage.setItem(`biometric_session_${principalId}`, JSON.stringify({ verified: true, timestamp: Date.now(), credentialId: credentialData.id }));
+      setMessage({ type: 'success', text: 'Identity verified! Proceeding with vote...' });
+      setTimeout(() => onVerified(), 1000);
     } catch (error) {
-      console.error('❌ Biometric verification error:', error);
-      
-      if (error.name === 'NotAllowedError') {
-        setMessage({
-          type: 'error',
-          text: '❌ Fingerprint verification was cancelled or timed out'
-        });
-      } else if (error.message.includes('cancelled')) {
-        setMessage({
-          type: 'error',
-          text: '❌ Fingerprint verification cancelled by user'
-        });
-      } else {
-        setMessage({
-          type: 'error',
-          text: `❌ Verification failed: ${error.message}`
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSkipBiometric = () => {
-    // Allow voting without biometric if not enrolled
-    setMessage({
-      type: 'warning',
-      text: '⚠️ Voting without biometric verification. Proceeding...'
-    });
-    setTimeout(() => {
-      onVerified();
-    }, 1000);
+      if (error.name === 'NotAllowedError') setMessage({ type: 'error', text: 'Verification was cancelled or timed out' });
+      else setMessage({ type: 'error', text: `Verification failed: ${error.message}` });
+    } finally { setLoading(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-800 border-2 border-blue-500 rounded-lg p-8 max-w-md w-full space-y-6 shadow-2xl shadow-blue-500/20">
-        {/* Header */}
-        <div className="text-center">
-          <div className="text-5xl mb-4 animate-bounce">👆</div>
-          <h2 className="text-2xl font-bold text-white mb-2">Security Verification</h2>
-          <p className="text-slate-300 text-sm">
-            Before casting your vote, please verify your identity using your fingerprint
-          </p>
-        </div>
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+      <div className="relative w-full max-w-md rounded-2xl border border-surface-700/50 bg-surface-900 shadow-2xl shadow-brand-500/10 overflow-hidden animate-fade-in-up">
+        {/* Top gradient bar */}
+        <div className="h-1 bg-gradient-to-r from-brand-500 via-purple-500 to-brand-500" />
 
-        {/* Vote Details */}
-        <div className="bg-slate-700/50 rounded-lg p-4 space-y-2 border border-slate-600">
-          <div className="text-xs text-slate-400">ELECTION</div>
-          <div className="text-white font-semibold text-sm line-clamp-1">
-            {electionTitle}
+        {/* Close button */}
+        <button onClick={onCancel} disabled={loading} className="absolute top-4 right-4 text-surface-500 hover:text-white transition-colors">
+          <X size={18} />
+        </button>
+
+        <div className="p-8 space-y-6">
+          {/* Header */}
+          <div className="text-center">
+            <div className={`inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-4 ${
+              loading ? 'bg-brand-500/10' : 'bg-brand-500/10'
+            }`}>
+              <Fingerprint size={36} className={`text-brand-400 ${loading ? 'animate-pulse' : ''}`} />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-1">Biometric Verification</h2>
+            <p className="text-sm text-surface-400">Confirm your identity to cast your vote</p>
           </div>
-          <div className="text-xs text-slate-400 mt-3">CANDIDATE</div>
-          <div className="text-blue-400 font-semibold">
-            {candidateName}
+
+          {/* Steps */}
+          <div className="flex items-center gap-3 text-xs">
+            <div className="flex items-center gap-1.5 text-success-400"><CheckCircle2 size={14} /> Internet Identity</div>
+            <div className="flex-1 h-px bg-surface-700" />
+            <div className="flex items-center gap-1.5 text-success-400"><CheckCircle2 size={14} /> Aadhaar OTP</div>
+            <div className="flex-1 h-px bg-surface-700" />
+            <div className="flex items-center gap-1.5 text-brand-400"><Fingerprint size={14} /> Fingerprint</div>
           </div>
-        </div>
 
-        {/* Message */}
-        {message.text && (
-          <div
-            className={`p-4 rounded-lg text-sm font-semibold ${
-              message.type === 'success'
-                ? 'bg-green-500/20 border border-green-500 text-green-400'
-                : message.type === 'error'
-                ? 'bg-red-500/20 border border-red-500 text-red-400'
-                : message.type === 'warning'
-                ? 'bg-yellow-500/20 border border-yellow-500 text-yellow-400'
-                : 'bg-blue-500/20 border border-blue-500 text-blue-400'
-            }`}
-          >
-            {message.text}
+          {/* Vote Details */}
+          <div className="rounded-xl bg-surface-800/50 border border-surface-700/40 p-4 space-y-3">
+            <div>
+              <p className="text-[10px] font-semibold text-surface-500 uppercase tracking-widest mb-1">Election</p>
+              <p className="text-sm font-medium text-white truncate">{electionTitle}</p>
+            </div>
+            <div className="h-px bg-surface-700/40" />
+            <div>
+              <p className="text-[10px] font-semibold text-surface-500 uppercase tracking-widest mb-1">Candidate</p>
+              <p className="text-sm font-semibold text-brand-400">{candidateName}</p>
+            </div>
           </div>
-        )}
 
-        {/* Action Buttons */}
-        <div className="space-y-3">
-          <button
-            onClick={handleBiometricVerification}
-            disabled={loading}
-            className="w-full px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 disabled:from-gray-500 disabled:to-gray-600 text-white font-bold rounded-lg transition-all duration-300 flex items-center justify-center gap-2"
-          >
-            {loading ? (
-              <>
-                <span className="animate-spin">⏳</span>
-                Verifying Fingerprint...
-              </>
-            ) : (
-              <>
-                👆 Verify with Fingerprint
-              </>
-            )}
-          </button>
-
-          {!isEnrolled && (
-            <button
-              onClick={handleSkipBiometric}
-              className="w-full px-6 py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold rounded-lg transition-all duration-300"
-            >
-              Skip (Biometric Not Enrolled)
-            </button>
+          {/* Message */}
+          {message.text && (
+            <div className={`flex items-center gap-3 p-3.5 rounded-xl text-sm font-medium ${
+              message.type === 'success' ? 'bg-success-500/5 border border-success-500/15 text-success-400' :
+              message.type === 'error' ? 'bg-danger-500/5 border border-danger-500/15 text-danger-400' :
+              message.type === 'warning' ? 'bg-warning-500/5 border border-warning-500/15 text-warning-400' :
+              'bg-brand-500/5 border border-brand-500/15 text-brand-400'
+            }`}>
+              {message.type === 'success' ? <CheckCircle2 size={16} /> :
+               message.type === 'error' ? <XCircle size={16} /> :
+               message.type === 'warning' ? <AlertTriangle size={16} /> :
+               <Fingerprint size={16} className="animate-pulse" />}
+              {message.text}
+            </div>
           )}
 
-          <button
-            onClick={onCancel}
-            disabled={loading}
-            className="w-full px-6 py-3 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 text-slate-200 font-semibold rounded-lg transition-all duration-300"
-          >
-            ✕ Cancel Voting
-          </button>
-        </div>
+          {/* Actions */}
+          <div className="space-y-3">
+            <button onClick={handleBiometricVerification} disabled={loading}
+              className="btn btn-primary w-full btn-lg group">
+              {loading ? <><Loader2 size={18} className="animate-spin" /> Verifying...</> :
+                <><Fingerprint size={18} className="group-hover:scale-110 transition-transform" /> Verify with Fingerprint</>}
+            </button>
 
-        {/* Security Info */}
-        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 text-xs text-blue-300 space-y-1">
-          <div className="font-semibold">🔒 Security Information:</div>
-          <ul className="list-disc list-inside space-y-1">
-            <li>Your vote is encrypted end-to-end</li>
-            <li>Fingerprint never leaves your device</li>
-            <li>Vote cannot be changed after casting</li>
-            <li>Recorded immutably on blockchain</li>
-          </ul>
+            {!isEnrolled && (
+              <div className="flex items-start gap-3 p-3.5 rounded-xl bg-danger-500/5 border border-danger-500/15">
+                <XCircle size={16} className="text-danger-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-danger-400">Biometric Not Enrolled</p>
+                  <p className="text-xs text-danger-400/70 mt-0.5">Go to Settings to enroll your fingerprint before voting.</p>
+                </div>
+              </div>
+            )}
+
+            <button onClick={onCancel} disabled={loading} className="btn btn-ghost w-full">
+              <X size={14} /> Cancel
+            </button>
+          </div>
+
+          {/* Security info */}
+          <div className="grid grid-cols-3 gap-2 pt-2">
+            {[
+              { icon: Lock, label: 'Internet Identity' },
+              { icon: CreditCard, label: 'Aadhaar OTP' },
+              { icon: Fingerprint, label: 'Biometric' },
+            ].map((item, i) => {
+              const Icon = item.icon;
+              return (
+                <div key={i} className="text-center">
+                  <Icon size={14} className="text-surface-500 mx-auto mb-1" />
+                  <p className="text-[10px] text-surface-500">{item.label}</p>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

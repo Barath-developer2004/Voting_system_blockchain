@@ -5,12 +5,14 @@
     "scripts": {
         "setup": "bash setup.sh",
         "start": "dfx start --background",
-        "deploy": "dfx deploy",
-        "deploy:backend": "dfx deploy voting_backend",
-        "deploy:frontend": "dfx deploy voting_frontend",
+        "deploy": "dfx deploy && bash generate-env.sh",
+        "deploy:backend": "dfx deploy voting_backend && bash generate-env.sh",
+        "deploy:frontend": "cd src/voting_frontend && npm run build && cd ../.. && dfx deploy voting_frontend",
+        "deploy:ii": "dfx deploy internet_identity",
+        "env": "bash generate-env.sh",
         "stop": "dfx stop",
         "clean": "dfx stop && rm -rf .dfx && dfx start --background --clean",
-        "frontend": "cd src/voting_frontend && npm start",
+        "frontend": "cd src/voting_frontend && npm run dev",
         "build": "cd src/voting_frontend && npm run build",
         "test": "echo 'No tests yet' && exit 0"
     },
