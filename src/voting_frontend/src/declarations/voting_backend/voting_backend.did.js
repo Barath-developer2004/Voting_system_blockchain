@@ -167,6 +167,7 @@ export const idlFactory = ({ IDL }) => {
   });
   return IDL.Service({
     'addAdmin' : IDL.Func([IDL.Principal], [Result], []),
+    'addAdminByInitializer' : IDL.Func([IDL.Principal], [Result], []),
     'addCandidate' : IDL.Func([CandidateInput], [Result_8], []),
     'amIAdmin' : IDL.Func([], [IDL.Bool], ['query']),
     'castVote' : IDL.Func([IDL.Nat, IDL.Nat], [Result], []),

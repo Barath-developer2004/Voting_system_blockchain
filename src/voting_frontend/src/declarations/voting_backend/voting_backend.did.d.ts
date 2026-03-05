@@ -166,6 +166,7 @@ export type VoterStatus = { 'Suspended' : null } |
   { 'Pending' : null };
 export interface _SERVICE {
   'addAdmin' : ActorMethod<[Principal], Result>,
+  'addAdminByInitializer' : ActorMethod<[Principal], Result>,
   'addCandidate' : ActorMethod<[CandidateInput], Result_8>,
   'amIAdmin' : ActorMethod<[], boolean>,
   'castVote' : ActorMethod<[bigint, bigint], Result>,

@@ -224,6 +224,7 @@ type AddressInfo =
  };
 service : {
   addAdmin: (newAdmin: principal) -> (Result);
+  addAdminByInitializer: (newAdmin: principal) -> (Result);
   addCandidate: (input: CandidateInput) -> (Result_8);
   amIAdmin: () -> (bool) query;
   castVote: (electionId: nat, candidateId: nat) -> (Result);
