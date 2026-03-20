@@ -12,7 +12,7 @@ export const idlFactory = ({ IDL }) => {
     'party' : IDL.Text,
     'partySymbol' : IDL.Text,
   });
-  const Result_8 = IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text });
+  const Result_11 = IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text });
   const Time = IDL.Int;
   const ElectionLevel = IDL.Variant({
     'State' : IDL.Null,
@@ -37,7 +37,7 @@ export const idlFactory = ({ IDL }) => {
     'electionType' : ElectionType,
     'constituency' : IDL.Text,
   });
-  const Result_7 = IDL.Variant({
+  const Result_10 = IDL.Variant({
     'ok' : IDL.Vec(IDL.Principal),
     'err' : IDL.Text,
   });
@@ -79,7 +79,7 @@ export const idlFactory = ({ IDL }) => {
     'verifiedAt' : IDL.Opt(Time),
     'verifiedBy' : IDL.Opt(IDL.Principal),
   });
-  const Result_2 = IDL.Variant({ 'ok' : IDL.Vec(Citizen), 'err' : IDL.Text });
+  const Result_4 = IDL.Variant({ 'ok' : IDL.Vec(Citizen), 'err' : IDL.Text });
   const ElectionStatus = IDL.Variant({
     'VotingClosed' : IDL.Null,
     'VotingOpen' : IDL.Null,
@@ -114,7 +114,7 @@ export const idlFactory = ({ IDL }) => {
     'details' : IDL.Text,
     'actorPrincipal' : IDL.Principal,
   });
-  const Result_6 = IDL.Variant({ 'ok' : IDL.Vec(AuditLog), 'err' : IDL.Text });
+  const Result_9 = IDL.Variant({ 'ok' : IDL.Vec(AuditLog), 'err' : IDL.Text });
   const Result_1 = IDL.Variant({ 'ok' : IDL.Bool, 'err' : IDL.Text });
   const Candidate = IDL.Record({
     'id' : IDL.Nat,
@@ -132,7 +132,7 @@ export const idlFactory = ({ IDL }) => {
     'party' : IDL.Text,
     'partySymbol' : IDL.Text,
   });
-  const Result_5 = IDL.Variant({ 'ok' : Election, 'err' : IDL.Text });
+  const Result_8 = IDL.Variant({ 'ok' : Election, 'err' : IDL.Text });
   const ElectionResults = IDL.Record({
     'status' : ElectionStatus,
     'electionTitle' : IDL.Text,
@@ -141,8 +141,41 @@ export const idlFactory = ({ IDL }) => {
     'electionId' : IDL.Nat,
     'candidates' : IDL.Vec(IDL.Tuple(IDL.Nat, IDL.Text, IDL.Text, IDL.Nat)),
   });
-  const Result_4 = IDL.Variant({ 'ok' : ElectionResults, 'err' : IDL.Text });
-  const Result_3 = IDL.Variant({ 'ok' : Citizen, 'err' : IDL.Text });
+  const Result_7 = IDL.Variant({ 'ok' : ElectionResults, 'err' : IDL.Text });
+  const Result_6 = IDL.Variant({ 'ok' : Citizen, 'err' : IDL.Text });
+  const Result_5 = IDL.Variant({
+    'ok' : IDL.Record({ 'status' : IDL.Text, 'requestId' : IDL.Nat }),
+    'err' : IDL.Text,
+  });
+  const RecoveryStatus = IDL.Variant({
+    'Approved' : IDL.Null,
+    'Rejected' : IDL.Null,
+    'Pending' : IDL.Null,
+  });
+  const RecoveryRequest = IDL.Record({
+    'id' : IDL.Nat,
+    'status' : RecoveryStatus,
+    'newPrincipal' : IDL.Principal,
+    'otpVerified' : IDL.Bool,
+    'mobileNumber' : IDL.Text,
+    'reviewedAt' : IDL.Opt(Time),
+    'reviewedBy' : IDL.Opt(IDL.Principal),
+    'oldPrincipal' : IDL.Principal,
+    'aadhaarNumber' : IDL.Text,
+    'requestedAt' : Time,
+  });
+  const Result_3 = IDL.Variant({
+    'ok' : IDL.Vec(RecoveryRequest),
+    'err' : IDL.Text,
+  });
+  const Result_2 = IDL.Variant({
+    'ok' : IDL.Record({
+      'enabled' : IDL.Bool,
+      'configured' : IDL.Bool,
+      'gateway' : IDL.Text,
+    }),
+    'err' : IDL.Text,
+  });
   const Statistics = IDL.Record({
     'totalElections' : IDL.Nat,
     'verifiedCitizens' : IDL.Nat,
@@ -159,6 +192,16 @@ export const idlFactory = ({ IDL }) => {
     'state' : IDL.Text,
     'pincode' : IDL.Text,
   });
+  const HttpHeader = IDL.Record({ 'value' : IDL.Text, 'name' : IDL.Text });
+  const HttpResponsePayload = IDL.Record({
+    'status' : IDL.Nat,
+    'body' : IDL.Vec(IDL.Nat8),
+    'headers' : IDL.Vec(HttpHeader),
+  });
+  const TransformArgs = IDL.Record({
+    'context' : IDL.Vec(IDL.Nat8),
+    'response' : HttpResponsePayload,
+  });
   const BiometricVerificationRequest = IDL.Record({
     'signature' : IDL.Text,
     'clientDataJSON' : IDL.Text,
@@ -168,26 +211,34 @@ export const idlFactory = ({ IDL }) => {
   return IDL.Service({
     'addAdmin' : IDL.Func([IDL.Principal], [Result], []),
     'addAdminByInitializer' : IDL.Func([IDL.Principal], [Result], []),
-    'addCandidate' : IDL.Func([CandidateInput], [Result_8], []),
+    'addCandidate' : IDL.Func([CandidateInput], [Result_11], []),
     'amIAdmin' : IDL.Func([], [IDL.Bool], ['query']),
     'castVote' : IDL.Func([IDL.Nat, IDL.Nat], [Result], []),
-    'createElection' : IDL.Func([ElectionInput], [Result_8], []),
+    'configureSms' : IDL.Func(
+        [IDL.Text, IDL.Bool, IDL.Opt(IDL.Text)],
+        [Result],
+        [],
+      ),
+    'createElection' : IDL.Func([ElectionInput], [Result_11], []),
     'endVoting' : IDL.Func([IDL.Nat], [Result], []),
     'enrollBiometricCredential' : IDL.Func(
         [IDL.Text, IDL.Text, IDL.Text],
         [Result],
         [],
       ),
-    'getAdmins' : IDL.Func([], [Result_7], ['query']),
-    'getAllCitizens' : IDL.Func([], [Result_2], ['query']),
+    'getAdmins' : IDL.Func([], [Result_10], ['query']),
+    'getAllCitizens' : IDL.Func([], [Result_4], ['query']),
     'getAllElections' : IDL.Func([], [IDL.Vec(Election)], ['query']),
-    'getAuditLogs' : IDL.Func([IDL.Nat], [Result_6], ['query']),
+    'getAuditLogs' : IDL.Func([IDL.Nat], [Result_9], ['query']),
     'getBiometricStatus' : IDL.Func([], [Result_1], ['query']),
     'getCandidates' : IDL.Func([IDL.Nat], [IDL.Vec(Candidate)], ['query']),
-    'getElection' : IDL.Func([IDL.Nat], [Result_5], ['query']),
-    'getElectionResults' : IDL.Func([IDL.Nat], [Result_4], ['query']),
-    'getMyCitizenProfile' : IDL.Func([], [Result_3], ['query']),
-    'getPendingCitizens' : IDL.Func([], [Result_2], ['query']),
+    'getElection' : IDL.Func([IDL.Nat], [Result_8], ['query']),
+    'getElectionResults' : IDL.Func([IDL.Nat], [Result_7], ['query']),
+    'getMyCitizenProfile' : IDL.Func([], [Result_6], ['query']),
+    'getMyRecoveryStatus' : IDL.Func([IDL.Text], [Result_5], ['query']),
+    'getPendingCitizens' : IDL.Func([], [Result_4], ['query']),
+    'getPendingRecoveryRequests' : IDL.Func([], [Result_3], ['query']),
+    'getSmsStatus' : IDL.Func([], [Result_2], []),
     'getStatistics' : IDL.Func([], [Statistics], ['query']),
     'getSystemInfo' : IDL.Func(
         [],
@@ -219,7 +270,11 @@ export const idlFactory = ({ IDL }) => {
       ),
     'removeBiometricCredential' : IDL.Func([], [Result], []),
     'requestAadhaarOTP' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
+    'requestRecoveryOTP' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
+    'reviewRecoveryRequest' : IDL.Func([IDL.Nat, IDL.Bool], [Result], []),
+    'setDevMode' : IDL.Func([IDL.Bool], [Result], []),
     'startVoting' : IDL.Func([IDL.Nat], [Result], []),
+    'transform' : IDL.Func([TransformArgs], [HttpResponsePayload], ['query']),
     'verifyAadhaarOTP' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
     'verifyBiometricCredential' : IDL.Func(
         [BiometricVerificationRequest],
@@ -231,6 +286,7 @@ export const idlFactory = ({ IDL }) => {
         [Result],
         [],
       ),
+    'verifyRecoveryOTP' : IDL.Func([IDL.Text, IDL.Text], [Result], []),
   });
 };
 export const init = ({ IDL }) => { return []; };

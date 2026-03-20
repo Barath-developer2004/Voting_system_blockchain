@@ -37,6 +37,16 @@ echo "📦 Deploying voting backend canister..."
 dfx deploy voting_backend 2>&1 | tail -3
 echo ""
 
+# --- Step 4.5: Initialize the system (deployer becomes admin) ---
+echo "🛡️  Initializing admin (your dfx identity becomes the admin)..."
+INIT_RESULT=$(dfx canister call voting_backend initialize 2>&1)
+echo "   $INIT_RESULT"
+
+# Show deployer's principal
+DEPLOYER_PRINCIPAL=$(dfx identity get-principal 2>/dev/null)
+echo "   Deployer principal: $DEPLOYER_PRINCIPAL"
+echo ""
+
 # --- Step 5: Generate .env file with canister IDs ---
 echo "⚙️  Generating environment config..."
 bash generate-env.sh
@@ -57,11 +67,14 @@ echo "║                                          ║"
 echo "║  Open your browser and go to:            ║"
 echo "║  👉  http://localhost:5173               ║"
 echo "║                                          ║"
-echo "║  First time?                             ║"
-echo "║  1. Click 'Login'                        ║"
-echo "║  2. Create an identity (any name works)  ║"
-echo "║  3. Click 'Claim Admin Role'             ║"
-echo "║  4. You are now the Election Officer!    ║"
+echo "║  Admin is auto-initialized!              ║"
+echo "║  To add your browser identity as admin:  ║"
+echo "║  1. Login → copy your Principal from     ║"
+echo "║     the 'System Setup' screen            ║"
+echo "║  2. Run:                                 ║"
+echo "║     dfx canister call voting_backend     ║"
+echo "║       addAdminByInitializer              ║"
+echo "║       '(principal \"<YOUR-PRINCIPAL>\")'    ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 

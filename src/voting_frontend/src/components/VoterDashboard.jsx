@@ -20,7 +20,7 @@ function VoterDashboard({ setCurrentView, onProfileUpdate }) {
         if (onProfileUpdate) onProfileUpdate();
       }
     } catch (error) {
-      console.error('Error loading profile:', error);
+      console.error('Error loading profile');
     } finally {
       setLoading(false);
       setRefreshing(false);

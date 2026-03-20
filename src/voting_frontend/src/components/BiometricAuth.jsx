@@ -73,12 +73,20 @@ function BiometricAuth({ onSuccess, onError }) {
       if (!enrollResult.ok) throw new Error(enrollResult.err || 'Failed to enroll on blockchain');
 
       const principalId = await api.getPrincipal();
-      localStorage.setItem(`biometric_credential_${principalId}`, JSON.stringify(credentialData));
+      // Store credential data in both sessionStorage and localStorage
+      // localStorage ensures it survives across tabs and page refreshes
+      const credentialStore = JSON.stringify({
+        id: credentialData.id,
+        rawId: credentialData.rawId,
+        type: credentialData.type
+      });
+      sessionStorage.setItem(`biometric_credential_${principalId}`, credentialStore);
+      localStorage.setItem(`biometric_credential_${principalId}`, credentialStore);
       localStorage.setItem(`biometric_enrolled_${principalId}`, 'true');
       setIsEnrolled(true);
       setMessage({ type: 'success', text: 'Biometric registration successful! You can now use your fingerprint.' });
     } catch (error) {
-      setMessage({ type: 'error', text: `Registration failed: ${error.message}` });
+      setMessage({ type: 'error', text: 'Biometric registration failed. Please try again.' });
       if (onError) onError(error);
     } finally { setLoading(false); }
   };
@@ -89,7 +97,16 @@ function BiometricAuth({ onSuccess, onError }) {
     try {
       if (!isEnrolled) throw new Error('Biometric not enrolled. Please register first.');
       const principalId = await api.getPrincipal();
-      const storedCredential = localStorage.getItem(`biometric_credential_${principalId}`);
+      // Try sessionStorage first, then localStorage for backward compat
+      let storedCredential = sessionStorage.getItem(`biometric_credential_${principalId}`);
+      if (!storedCredential) {
+        storedCredential = localStorage.getItem(`biometric_credential_${principalId}`);
+        if (storedCredential) {
+          // Migrate to sessionStorage and clean up localStorage
+          sessionStorage.setItem(`biometric_credential_${principalId}`, storedCredential);
+          localStorage.removeItem(`biometric_credential_${principalId}`);
+        }
+      }
       if (!storedCredential) throw new Error('No biometric credential found for your account');
       const credentialData = JSON.parse(storedCredential);
       const challenge = generateChallenge();
@@ -115,7 +132,7 @@ function BiometricAuth({ onSuccess, onError }) {
         if (onSuccess) setTimeout(() => onSuccess(), 1000);
       } else throw new Error('Backend verification failed');
     } catch (error) {
-      setMessage({ type: 'error', text: `Login failed: ${error.message}` });
+      setMessage({ type: 'error', text: 'Biometric login failed. Please try again.' });
       if (onError) onError(error);
     } finally { setLoading(false); }
   };
@@ -123,6 +140,7 @@ function BiometricAuth({ onSuccess, onError }) {
   const handleRemoveBiometric = async () => {
     try {
       const principalId = await api.getPrincipal();
+      sessionStorage.removeItem(`biometric_credential_${principalId}`);
       localStorage.removeItem(`biometric_credential_${principalId}`);
       localStorage.removeItem(`biometric_enrolled_${principalId}`);
       localStorage.removeItem('biometric_credential');

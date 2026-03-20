@@ -1,7 +1,7 @@
 import React from 'react';
 import { ShieldCheck, Blocks, Fingerprint, ArrowRight, Zap, Eye, Lock, CheckCircle2, Server, Users, Vote } from 'lucide-react';
 
-function Home({ onLogin, systemInfo }) {
+function Home({ onLogin, systemInfo, onRecoverAccount }) {
   const features = [
     {
       icon: ShieldCheck,
@@ -85,6 +85,14 @@ function Home({ onLogin, systemInfo }) {
               </div>
             </div>
             <p className="text-xs text-surface-500 mt-3 border-t border-surface-700/30 pt-3">Each person gets their own unique identity number. No passwords — your device's biometric (fingerprint/face/PIN) IS your password.</p>
+          </div>
+
+          {/* Recovery link */}
+          <div className="mt-4 text-center animate-fade-in-up" style={{ animationDelay: '0.38s' }}>
+            <button onClick={onRecoverAccount}
+              className="text-sm text-amber-400/80 hover:text-amber-300 transition-colors underline underline-offset-4 decoration-amber-500/30 hover:decoration-amber-500/60">
+              Lost your account? Recover it here
+            </button>
           </div>
 
           {/* Trust indicators */}

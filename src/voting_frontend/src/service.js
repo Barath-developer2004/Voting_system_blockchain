@@ -11,11 +11,30 @@ const host = isLocal ? 'http://localhost:4943' : 'https://ic0.app';
 let authClient = null;
 let actor = null;
 
-// Backend canister ID (from dfx deploy output)
-const canisterId = process.env.CANISTER_ID_VOTING_BACKEND || 'uzt4z-lp777-77774-qaabq-cai';
+// Production-safe logger — only logs in local development
+const logger = {
+    log: (...args) => { if (isLocal) console.log(...args); },
+    warn: (...args) => { if (isLocal) console.warn(...args); },
+    error: (...args) => { console.error(...args); }, // errors always logged
+};
 
-// Internet Identity canister ID (from dfx deploy output)
-const iiCanisterId = process.env.CANISTER_ID_INTERNET_IDENTITY || 'uxrrr-q7777-77774-qaaaq-cai';
+// Backend canister ID — MUST be set via environment at build time
+const canisterId = process.env.CANISTER_ID_VOTING_BACKEND;
+if (!canisterId) {
+    throw new Error(
+        'CANISTER_ID_VOTING_BACKEND is not set. ' +
+        'Run: dfx deploy && bash generate-env.sh, then rebuild the frontend.'
+    );
+}
+
+// Internet Identity canister ID
+const iiCanisterId = process.env.CANISTER_ID_INTERNET_IDENTITY;
+if (!iiCanisterId && isLocal) {
+    throw new Error(
+        'CANISTER_ID_INTERNET_IDENTITY is not set. ' +
+        'Run: dfx deploy internet_identity && bash generate-env.sh'
+    );
+}
 
 // Build the Identity Provider URL
 // Local:   http://<ii-canister-id>.localhost:4943
@@ -24,9 +43,9 @@ const identityProvider = isLocal
     ? `http://${iiCanisterId}.localhost:4943`
     : 'https://identity.ic0.app';
 
-console.log('🌐 Network:', network);
-console.log('🔗 Backend Canister:', canisterId);
-console.log('🔑 Identity Provider:', identityProvider);
+logger.log('🌐 Network:', network);
+logger.log('🔗 Backend Canister:', canisterId);
+logger.log('🔑 Identity Provider:', identityProvider);
 
 // ============ AUTHENTICATION ============
 
@@ -43,15 +62,13 @@ export const initAuth = async () => {
 export const login = async () => {
     return new Promise(async (resolve, reject) => {
         try {
-            console.log('🔐 Starting Internet Identity login...');
+            logger.log('🔐 Starting Internet Identity login...');
 
             if (!authClient) {
                 authClient = await AuthClient.create();
             }
 
-            console.log('🌐 Opening Internet Identity popup...');
-            console.log('   → New users: Click "Create New" to get an Anchor Number');
-            console.log('   → Returning users: Enter your Anchor Number');
+            logger.log('🌐 Opening Internet Identity popup...');
 
             authClient.login({
                 identityProvider,
@@ -62,24 +79,24 @@ export const login = async () => {
                 `,
                 maxTimeToLive: BigInt(7 * 24 * 60 * 60 * 1000 * 1000 * 1000), // 7 days
                 onSuccess: async () => {
-                    console.log('✅ Internet Identity authentication successful!');
+                    logger.log('✅ Internet Identity authentication successful!');
                     try {
                         await setupActor();
                         const principal = authClient.getIdentity().getPrincipal().toString();
-                        console.log('✅ Logged in as:', principal);
+                        logger.log('✅ Logged in as:', principal);
                         resolve(true);
                     } catch (err) {
-                        console.error('❌ Error setting up connection:', err);
+                        console.error('Login connection error');
                         reject(err);
                     }
                 },
                 onError: (error) => {
-                    console.error('❌ Login failed:', error);
+                    console.error('Login failed');
                     reject(error);
                 },
             });
         } catch (error) {
-            console.error('❌ Login initialization error:', error);
+            console.error('Login initialization error');
             reject(error);
         }
     });
@@ -91,7 +108,7 @@ export const logout = async () => {
     }
     actor = null;
     authClient = null;
-    console.log('🚪 Logged out and cleared authentication state');
+    logger.log('Logged out and cleared authentication state');
 };
 
 export const isAuthenticated = async () => {
@@ -121,11 +138,10 @@ const setupActor = async () => {
         identity,
     });
 
-    // Fetch root key for certificate validation during development
+    // Fetch root key for certificate validation during development only
     if (isLocal) {
         await agent.fetchRootKey().catch(err => {
-            console.warn('Unable to fetch root key. Check if the local replica is running');
-            console.error(err);
+            logger.warn('Unable to fetch root key. Check if the local replica is running');
         });
     }
 
@@ -148,26 +164,26 @@ export const getActor = () => {
 
 export const requestAadhaarOTP = async (aadhaarNumber, mobileNumber) => {
     try {
-        console.log('\ud83d\udce8 Requesting Aadhaar OTP...');
+        logger.log('Requesting Aadhaar OTP...');
         const actor = getActor();
         const result = await actor.requestAadhaarOTP(aadhaarNumber, mobileNumber);
-        console.log('\ud83d\udce8 OTP request result:', result);
+        logger.log('OTP request result:', result);
         return result;
     } catch (error) {
-        console.error('\u274c OTP request error:', error);
+        console.error('OTP request error');
         throw error;
     }
 };
 
 export const verifyAadhaarOTP = async (aadhaarNumber, otp) => {
     try {
-        console.log('\ud83d\udd10 Verifying Aadhaar OTP...');
+        logger.log('Verifying Aadhaar OTP...');
         const actor = getActor();
         const result = await actor.verifyAadhaarOTP(aadhaarNumber, otp);
-        console.log('\ud83d\udd10 OTP verify result:', result);
+        logger.log('OTP verify result:', result);
         return result;
     } catch (error) {
-        console.error('\u274c OTP verify error:', error);
+        console.error('OTP verify error');
         throw error;
     }
 };
@@ -179,7 +195,7 @@ export const initializeSystem = async () => {
 
 export const registerCitizen = async (data) => {
     try {
-        console.log('📡 Calling backend registerCitizen with:', data);
+        logger.log('Calling backend registerCitizen...');
         const actor = getActor();
         if (!actor) {
             throw new Error('Actor not initialized. Please login first.');
@@ -195,10 +211,10 @@ export const registerCitizen = async (data) => {
             data.photoUrl,
             data.voterIdNumber
         );
-        console.log('📡 Backend response:', result);
+        logger.log('Backend response:', result);
         return result;
     } catch (error) {
-        console.error('📡 Service registerCitizen error:', error);
+        console.error('Service registerCitizen error');
         throw error;
     }
 };
@@ -260,17 +276,18 @@ export const getCandidates = async (electionId) => {
 
 export const castVote = async (electionId, candidateId) => {
     const actor = getActor();
-    return await actor.castVote(electionId, candidateId);
+    // Convert numbers to BigInt format required by Motoko Nat types
+    return await actor.castVote(BigInt(electionId), BigInt(candidateId));
 };
 
 export const hasVoted = async (electionId) => {
     const actor = getActor();
-    return await actor.hasVoted(electionId);
+    return await actor.hasVoted(BigInt(electionId));
 };
 
 export const getElectionResults = async (electionId) => {
     const actor = getActor();
-    return await actor.getElectionResults(electionId);
+    return await actor.getElectionResults(BigInt(electionId));
 };
 
 export const amIAdmin = async () => {
@@ -298,6 +315,52 @@ export const getAuditLogs = async (limit) => {
     return await actor.getAuditLogs(limit);
 };
 
+// ============ SMS CONFIGURATION (Admin) ============
+
+export const configureSms = async (apiKey, enabled, gatewayUrl = null) => {
+    const actor = getActor();
+    return await actor.configureSms(apiKey, enabled, gatewayUrl ? [gatewayUrl] : []);
+};
+
+export const getSmsStatus = async () => {
+    const actor = getActor();
+    return await actor.getSmsStatus();
+};
+
+// ============ ACCOUNT RECOVERY ============
+
+export const requestRecoveryOTP = async (aadhaarNumber, mobileNumber) => {
+    const actor = getActor();
+    return await actor.requestRecoveryOTP(aadhaarNumber, mobileNumber);
+};
+
+export const verifyRecoveryOTP = async (aadhaarNumber, otp) => {
+    const actor = getActor();
+    return await actor.verifyRecoveryOTP(aadhaarNumber, otp);
+};
+
+export const getMyRecoveryStatus = async (aadhaarNumber) => {
+    const actor = getActor();
+    return await actor.getMyRecoveryStatus(aadhaarNumber);
+};
+
+export const getPendingRecoveryRequests = async () => {
+    const actor = getActor();
+    return await actor.getPendingRecoveryRequests();
+};
+
+export const reviewRecoveryRequest = async (requestId, approve) => {
+    const actor = getActor();
+    return await actor.reviewRecoveryRequest(requestId, approve);
+};
+
+// ============ ADMIN MANAGEMENT (Portal) ============
+
+export const addAdminByInitializer = async (newAdminPrincipal) => {
+    const actor = getActor();
+    return await actor.addAdminByInitializer(newAdminPrincipal);
+};
+
 // ============ ADMIN SETUP (SELF-SERVICE) ============
 // Calls initialize() on the backend — the first caller becomes admin.
 // This allows a client to claim admin from the browser without using CLI.
@@ -317,7 +380,7 @@ export const getSystemInfo = async () => {
         const agent = new HttpAgent({ host });
         if (isLocal) {
             await agent.fetchRootKey().catch(err => {
-                console.warn('Unable to fetch root key');
+                logger.warn('Unable to fetch root key');
             });
         }
 
@@ -328,7 +391,7 @@ export const getSystemInfo = async () => {
 
         return await anonymousActor.getSystemInfo();
     } catch (error) {
-        console.error('Error getting system info:', error);
+        console.error('Error getting system info');
         throw error;
     }
 };
@@ -348,10 +411,9 @@ const getBiometricKey = (suffix) => {
 
 export const enrollBiometricCredential = async (credentialData) => {
     try {
-        console.log('🔐 Enrolling biometric credential on blockchain...');
+        logger.log('Enrolling biometric credential on blockchain...');
 
         if (!actor) {
-            console.error('❌ Actor not initialized');
             return { err: 'Actor not initialized' };
         }
 
@@ -363,10 +425,10 @@ export const enrollBiometricCredential = async (credentialData) => {
         );
 
         if (result.ok) {
-            console.log('✅ Biometric enrolled on blockchain:', result.ok);
+            logger.log('Biometric enrolled on blockchain');
 
             // Store per-user biometric session (keyed by principal)
-            localStorage.setItem(getBiometricKey('session'), JSON.stringify({
+            sessionStorage.setItem(getBiometricKey('session'), JSON.stringify({
                 verified: true,
                 timestamp: Date.now(),
                 credentialId: credentialData.id
@@ -374,21 +436,20 @@ export const enrollBiometricCredential = async (credentialData) => {
 
             return result;
         } else {
-            console.error('❌ Backend enrollment failed:', result.err);
+            logger.error('Backend enrollment failed:', result.err);
             return result;
         }
     } catch (error) {
-        console.error('❌ Error enrolling biometric:', error);
+        console.error('Error enrolling biometric');
         return { err: error.message };
     }
 };
 
 export const verifyBiometricCredential = async (credentialData) => {
     try {
-        console.log('🔐 Verifying biometric credential on blockchain...');
+        logger.log('Verifying biometric credential on blockchain...');
 
         if (!actor) {
-            console.error('❌ Actor not initialized');
             return { err: 'Actor not initialized' };
         }
 
@@ -401,10 +462,10 @@ export const verifyBiometricCredential = async (credentialData) => {
         });
 
         if (result.ok) {
-            console.log('✅ Biometric verification successful on blockchain');
+            logger.log('Biometric verification successful on blockchain');
 
             // Store per-user biometric session
-            localStorage.setItem(getBiometricKey('session'), JSON.stringify({
+            sessionStorage.setItem(getBiometricKey('session'), JSON.stringify({
                 verified: true,
                 timestamp: Date.now(),
                 credentialId: credentialData.credentialId
@@ -412,52 +473,50 @@ export const verifyBiometricCredential = async (credentialData) => {
 
             return result;
         } else {
-            console.error('❌ Backend verification failed:', result.err);
+            logger.error('Backend verification failed:', result.err);
             return result;
         }
     } catch (error) {
-        console.error('❌ Error verifying biometric:', error);
+        console.error('Error verifying biometric');
         return { err: error.message };
     }
 };
 
 export const getBiometricStatus = async () => {
     try {
-        console.log('🔍 Checking biometric status...');
+        logger.log('Checking biometric status...');
 
         if (!actor) {
-            console.error('❌ Actor not initialized');
             return { err: 'Actor not initialized' };
         }
 
         const result = await actor.getBiometricStatus();
         return result;
     } catch (error) {
-        console.error('❌ Error getting biometric status:', error);
+        console.error('Error getting biometric status');
         return { err: error.message };
     }
 };
 
 export const removeBiometricCredential = async () => {
     try {
-        console.log('🗑️  Removing biometric credential...');
+        logger.log('Removing biometric credential...');
 
         if (!actor) {
-            console.error('❌ Actor not initialized');
             return { err: 'Actor not initialized' };
         }
 
         const result = await actor.removeBiometricCredential();
 
         if (result.ok) {
-            localStorage.removeItem(getBiometricKey('session'));
+            sessionStorage.removeItem(getBiometricKey('session'));
             localStorage.removeItem(getBiometricKey('credential'));
             localStorage.removeItem(getBiometricKey('enrolled'));
         }
 
         return result;
     } catch (error) {
-        console.error('❌ Error removing biometric:', error);
+        console.error('Error removing biometric');
         return { err: error.message };
     }
 };
@@ -469,37 +528,46 @@ export const isBiometricEnrolled = () => {
         if (localStorage.getItem(perUserKey) === 'true') return true;
         // Legacy fallback
         return localStorage.getItem('biometric_enrolled') === 'true';
-    } catch (error) {
-        console.error('Error checking biometric enrollment:', error);
+    } catch {
         return false;
     }
 };
 
 export const getBiometricSession = () => {
     try {
-        const session = localStorage.getItem(getBiometricKey('session'));
+        // Check sessionStorage first, then localStorage for migration
+        let session = sessionStorage.getItem(getBiometricKey('session'));
+        if (!session) {
+            session = localStorage.getItem(getBiometricKey('session'));
+            if (session) {
+                // Migrate from localStorage to sessionStorage
+                sessionStorage.setItem(getBiometricKey('session'), session);
+                localStorage.removeItem(getBiometricKey('session'));
+            }
+        }
         if (!session) return null;
 
         const sessionData = JSON.parse(session);
         // Check if session is still valid (24 hours)
         const maxAge = 24 * 60 * 60 * 1000;
         if (Date.now() - sessionData.timestamp > maxAge) {
-            localStorage.removeItem(getBiometricKey('session'));
+            sessionStorage.removeItem(getBiometricKey('session'));
             return null;
         }
 
         return sessionData;
-    } catch (error) {
-        console.error('Error getting biometric session:', error);
+    } catch {
         return null;
     }
 };
 
 export const clearBiometricSession = () => {
     try {
+        sessionStorage.removeItem(getBiometricKey('session'));
+        // Also clean up any legacy localStorage entries
         localStorage.removeItem(getBiometricKey('session'));
-        console.log('✅ Biometric session cleared');
-    } catch (error) {
-        console.error('Error clearing biometric session:', error);
+        logger.log('Biometric session cleared');
+    } catch {
+        // silently ignore
     }
 };

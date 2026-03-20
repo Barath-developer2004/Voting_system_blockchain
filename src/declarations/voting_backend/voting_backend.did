@@ -5,6 +5,11 @@ type VoterStatus =
    Suspended;
    Verified;
  };
+type TransformArgs = 
+ record {
+   context: blob;
+   response: HttpResponsePayload;
+ };
 type Time = int;
 type Statistics = 
  record {
@@ -15,40 +20,62 @@ type Statistics =
    totalVotesCast: nat;
    verifiedCitizens: nat;
  };
-type Result_8 = 
- variant {
-   err: text;
-   ok: nat;
- };
-type Result_7 = 
- variant {
-   err: text;
-   ok: vec principal;
- };
-type Result_6 = 
+type Result_9 = 
  variant {
    err: text;
    ok: vec AuditLog;
  };
-type Result_5 = 
+type Result_8 = 
  variant {
    err: text;
    ok: Election;
  };
-type Result_4 = 
+type Result_7 = 
  variant {
    err: text;
    ok: ElectionResults;
  };
-type Result_3 = 
+type Result_6 = 
  variant {
    err: text;
    ok: Citizen;
  };
-type Result_2 = 
+type Result_5 = 
+ variant {
+   err: text;
+   ok: record {
+         requestId: nat;
+         status: text;
+       };
+ };
+type Result_4 = 
  variant {
    err: text;
    ok: vec Citizen;
+ };
+type Result_3 = 
+ variant {
+   err: text;
+   ok: vec RecoveryRequest;
+ };
+type Result_2 = 
+ variant {
+   err: text;
+   ok: record {
+         configured: bool;
+         enabled: bool;
+         gateway: text;
+       };
+ };
+type Result_11 = 
+ variant {
+   err: text;
+   ok: nat;
+ };
+type Result_10 = 
+ variant {
+   err: text;
+   ok: vec principal;
  };
 type Result_1 = 
  variant {
@@ -59,6 +86,36 @@ type Result =
  variant {
    err: text;
    ok: text;
+ };
+type RecoveryStatus = 
+ variant {
+   Approved;
+   Pending;
+   Rejected;
+ };
+type RecoveryRequest = 
+ record {
+   aadhaarNumber: text;
+   id: nat;
+   mobileNumber: text;
+   newPrincipal: principal;
+   oldPrincipal: principal;
+   otpVerified: bool;
+   requestedAt: Time;
+   reviewedAt: opt Time;
+   reviewedBy: opt principal;
+   status: RecoveryStatus;
+ };
+type HttpResponsePayload = 
+ record {
+   body: blob;
+   headers: vec HttpHeader;
+   status: nat;
+ };
+type HttpHeader = 
+ record {
+   name: text;
+   value: text;
  };
 type Gender = 
  variant {
@@ -225,23 +282,28 @@ type AddressInfo =
 service : {
   addAdmin: (newAdmin: principal) -> (Result);
   addAdminByInitializer: (newAdmin: principal) -> (Result);
-  addCandidate: (input: CandidateInput) -> (Result_8);
+  addCandidate: (input: CandidateInput) -> (Result_11);
   amIAdmin: () -> (bool) query;
   castVote: (electionId: nat, candidateId: nat) -> (Result);
-  createElection: (input: ElectionInput) -> (Result_8);
+  configureSms: (apiKey: text, enabled: bool, gatewayUrl: opt text) ->
+   (Result);
+  createElection: (input: ElectionInput) -> (Result_11);
   endVoting: (electionId: nat) -> (Result);
   enrollBiometricCredential: (credentialId: text, clientDataJSON: text,
    attestationObject: text) -> (Result);
-  getAdmins: () -> (Result_7) query;
-  getAllCitizens: () -> (Result_2) query;
+  getAdmins: () -> (Result_10) query;
+  getAllCitizens: () -> (Result_4) query;
   getAllElections: () -> (vec Election) query;
-  getAuditLogs: (limit: nat) -> (Result_6) query;
+  getAuditLogs: (limit: nat) -> (Result_9) query;
   getBiometricStatus: () -> (Result_1) query;
   getCandidates: (electionId: nat) -> (vec Candidate) query;
-  getElection: (electionId: nat) -> (Result_5) query;
-  getElectionResults: (electionId: nat) -> (Result_4) query;
-  getMyCitizenProfile: () -> (Result_3) query;
-  getPendingCitizens: () -> (Result_2) query;
+  getElection: (electionId: nat) -> (Result_8) query;
+  getElectionResults: (electionId: nat) -> (Result_7) query;
+  getMyCitizenProfile: () -> (Result_6) query;
+  getMyRecoveryStatus: (aadhaarNumber: text) -> (Result_5) query;
+  getPendingCitizens: () -> (Result_4) query;
+  getPendingRecoveryRequests: () -> (Result_3) query;
+  getSmsStatus: () -> (Result_2);
   getStatistics: () -> (Statistics) query;
   getSystemInfo: () ->
    (record {
@@ -256,10 +318,15 @@ service : {
    aadhaarPhotoUrl: text, photoUrl: text, voterIdNumber: text) -> (Result);
   removeBiometricCredential: () -> (Result);
   requestAadhaarOTP: (aadhaarNumber: text, mobileNumber: text) -> (Result);
+  requestRecoveryOTP: (aadhaarNumber: text, mobileNumber: text) -> (Result);
+  reviewRecoveryRequest: (requestId: nat, approve: bool) -> (Result);
+  setDevMode: (enabled: bool) -> (Result);
   startVoting: (electionId: nat) -> (Result);
+  transform: (raw: TransformArgs) -> (HttpResponsePayload) query;
   verifyAadhaarOTP: (aadhaarNumber: text, enteredOTP: text) -> (Result);
   verifyBiometricCredential: (request: BiometricVerificationRequest) ->
    (Result_1);
   verifyCitizen: (citizenPrincipal: principal, approve: bool, voterIdNumber:
    opt text, rejectionReason: opt text) -> (Result);
+  verifyRecoveryOTP: (aadhaarNumber: text, enteredOTP: text) -> (Result);
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, ShieldCheck, Clock, Landmark, Vote, BarChart3, Plus, X, RefreshCw, ChevronDown, CheckCircle2, XCircle, Phone, MapPin, CreditCard, Calendar, User, FileText, AlertCircle, Eye, Image } from 'lucide-react';
+import { Users, ShieldCheck, Clock, Landmark, Vote, BarChart3, Plus, X, RefreshCw, ChevronDown, CheckCircle2, XCircle, Phone, MapPin, CreditCard, Calendar, User, FileText, AlertCircle, Eye, Image, MessageSquare, ShieldAlert, UserPlus, Copy } from 'lucide-react';
 import * as api from '../service';
 
 function AdminDashboard() {
@@ -10,6 +10,16 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(false);
   const [showElectionForm, setShowElectionForm] = useState(false);
   const [expandedCitizen, setExpandedCitizen] = useState(null);
+  const [smsStatus, setSmsStatus] = useState(null);
+  const [smsApiKey, setSmsApiKey] = useState('');
+  const [smsGatewayUrl, setSmsGatewayUrl] = useState('');
+  const [smsLoading, setSmsLoading] = useState(false);
+  const [recoveryRequests, setRecoveryRequests] = useState([]);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [newAdminPrincipal, setNewAdminPrincipal] = useState('');
+  const [adminList, setAdminList] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [copiedPrincipal, setCopiedPrincipal] = useState('');
 
   useEffect(() => {
     loadData();
@@ -18,20 +28,116 @@ function AdminDashboard() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [pending, all, stats] = await Promise.all([
+      const [pending, all, stats, sms, recovery, admins] = await Promise.all([
         api.getPendingCitizens(),
         api.getAllCitizens(),
-        api.getStatistics()
+        api.getStatistics(),
+        api.getSmsStatus().catch(() => null),
+        api.getPendingRecoveryRequests().catch(() => null),
+        api.getAdmins().catch(() => null)
       ]);
 
       if (pending.ok) setPendingCitizens(pending.ok);
       if (all.ok) setAllCitizens(all.ok);
       setStatistics(stats);
+      if (sms && sms.ok) {
+        setSmsStatus(sms.ok);
+        if (sms.ok.gateway) setSmsGatewayUrl(sms.ok.gateway);
+      }
+      if (recovery && recovery.ok) setRecoveryRequests(recovery.ok);
+      if (admins && admins.ok) setAdminList(admins.ok);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Error loading data');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSmsConfig = async (e) => {
+    e.preventDefault();
+    setSmsLoading(true);
+    try {
+      const result = await api.configureSms(
+        smsApiKey,
+        true,
+        smsGatewayUrl || null
+      );
+      if (result.ok) {
+        alert(result.ok);
+        setSmsApiKey('');
+        const sms = await api.getSmsStatus();
+        if (sms.ok) setSmsStatus(sms.ok);
+      } else {
+        alert(result.err || 'Failed to configure SMS');
+      }
+    } catch (error) {
+      alert('Failed to configure SMS. Please try again.');
+    } finally {
+      setSmsLoading(false);
+    }
+  };
+
+  const handleSmsDisable = async () => {
+    setSmsLoading(true);
+    try {
+      const result = await api.configureSms('', false, null);
+      if (result.ok) {
+        alert(result.ok);
+        const sms = await api.getSmsStatus();
+        if (sms.ok) setSmsStatus(sms.ok);
+      }
+    } catch (error) {
+      alert('Failed to update SMS settings.');
+    } finally {
+      setSmsLoading(false);
+    }
+  };
+
+  const handleReviewRecovery = async (requestId, approve) => {
+    setRecoveryLoading(true);
+    try {
+      const result = await api.reviewRecoveryRequest(requestId, approve);
+      if (result.ok) {
+        alert(result.ok);
+        await loadData();
+      } else {
+        alert(result.err || 'Failed to review recovery request');
+      }
+    } catch (error) {
+      alert('Failed to review recovery request. Please try again.');
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
+  const handleAddAdmin = async (e) => {
+    e.preventDefault();
+    if (!newAdminPrincipal.trim()) return;
+    setAdminLoading(true);
+    try {
+      const result = await api.addAdminByInitializer(
+        window.__ic_agent_Principal
+          ? window.__ic_agent_Principal.fromText(newAdminPrincipal.trim())
+          : newAdminPrincipal.trim()
+      );
+      if (result.ok) {
+        alert(result.ok);
+        setNewAdminPrincipal('');
+        await loadData();
+      } else {
+        alert(result.err || 'Failed to add admin');
+      }
+    } catch (error) {
+      alert('Failed to add admin. Only the initial deployer/admin can add new admins.');
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    setCopiedPrincipal(text);
+    setTimeout(() => setCopiedPrincipal(''), 2000);
   };
 
   const handleVerify = async (principal, approve) => {
@@ -45,11 +151,11 @@ function AdminDashboard() {
         alert(result.ok);
         await loadData();
       } else {
-        alert('Error: ' + result.err);
+        alert('Verification failed. Please try again.');
       }
     } catch (error) {
-      console.error('Verification error:', error);
-      alert('Failed to verify citizen: ' + error.message);
+      console.error('Verification error');
+      alert('Failed to verify citizen. Please try again.');
     }
   };
 
@@ -73,11 +179,11 @@ function AdminDashboard() {
         setShowElectionForm(false);
         e.target.reset();
       } else {
-        alert('Error: ' + result.err);
+        alert('Failed to create election. Please check the details and try again.');
       }
     } catch (error) {
-      console.error('Error creating election:', error);
-      alert('Failed to create election');
+      console.error('Error creating election');
+      alert('Failed to create election. Please check the details and try again.');
     }
   };
 
@@ -210,6 +316,9 @@ function AdminDashboard() {
           {[
             { key: 'pending', label: 'Pending Verification', count: pendingCitizens.length, icon: Clock },
             { key: 'all', label: 'All Citizens', count: allCitizens.length, icon: Users },
+            { key: 'recovery', label: 'Recovery', count: recoveryRequests.length, icon: ShieldAlert },
+            { key: 'admins', label: 'Admin Setup', count: null, icon: UserPlus },
+            { key: 'sms', label: 'SMS Settings', count: null, icon: MessageSquare },
           ].map(tab => {
             const TabIcon = tab.icon;
             const active = activeTab === tab.key;
@@ -220,9 +329,9 @@ function AdminDashboard() {
                 }`}>
                 <TabIcon size={15} />
                 {tab.label}
-                <span className={`ml-1 text-xs px-2 py-0.5 rounded-full ${
+                {tab.count !== null && <span className={`ml-1 text-xs px-2 py-0.5 rounded-full ${
                   active ? 'bg-brand-500/15 text-brand-400' : 'bg-surface-700/50 text-surface-500'
-                }`}>{tab.count}</span>
+                }`}>{tab.count}</span>}
                 {active && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-500 rounded-t" />}
               </button>
             );
@@ -390,6 +499,238 @@ function AdminDashboard() {
                 ))}
               </div>
             )
+          ) : activeTab === 'recovery' ? (
+            <div className="space-y-4">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <ShieldAlert size={18} className="text-amber-400" /> Account Recovery Requests
+              </h3>
+              <p className="text-sm text-surface-400">
+                When citizens lose their Internet Identity, they can request to transfer their profile to a new identity.
+                Review and approve legitimate requests below.
+              </p>
+
+              {recoveryRequests.length === 0 ? (
+                <div className="text-center py-16">
+                  <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-surface-700/30 mb-4">
+                    <ShieldAlert size={28} className="text-surface-500" />
+                  </div>
+                  <p className="text-surface-300 font-medium">No pending recovery requests</p>
+                  <p className="text-surface-500 text-sm mt-1">Recovery requests will appear here when citizens need account transfers.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {recoveryRequests.map((req, idx) => (
+                    <div key={idx} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <span className="badge badge-warning">Request #{Number(req.id)}</span>
+                          <span className="badge badge-success ml-2">OTP Verified</span>
+                        </div>
+                        <span className="text-xs text-surface-500">
+                          {new Date(Number(req.requestedAt) / 1000000).toLocaleString()}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 text-sm">
+                        <div>
+                          <p className="text-xs text-surface-500 mb-1">Aadhaar Number</p>
+                          <p className="text-surface-300 font-mono">
+                            {'••••••••' + req.aadhaarNumber.slice(-4)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-surface-500 mb-1">Mobile</p>
+                          <p className="text-surface-300">{req.mobileNumber}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-surface-500 mb-1">Old Principal</p>
+                          <div className="flex items-center gap-1">
+                            <p className="text-surface-400 font-mono text-xs truncate max-w-[220px]">{req.oldPrincipal.toString()}</p>
+                            <button onClick={() => copyToClipboard(req.oldPrincipal.toString())}
+                              className="text-surface-500 hover:text-surface-300">
+                              {copiedPrincipal === req.oldPrincipal.toString() ? <CheckCircle2 size={12} className="text-green-400" /> : <Copy size={12} />}
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs text-surface-500 mb-1">New Principal (requesting)</p>
+                          <div className="flex items-center gap-1">
+                            <p className="text-brand-300 font-mono text-xs truncate max-w-[220px]">{req.newPrincipal.toString()}</p>
+                            <button onClick={() => copyToClipboard(req.newPrincipal.toString())}
+                              className="text-surface-500 hover:text-surface-300">
+                              {copiedPrincipal === req.newPrincipal.toString() ? <CheckCircle2 size={12} className="text-green-400" /> : <Copy size={12} />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3">
+                        <button onClick={() => handleReviewRecovery(req.id, true)} disabled={recoveryLoading}
+                          className="btn btn-sm bg-green-500/10 text-green-400 border border-green-500/20 hover:bg-green-500/20">
+                          <CheckCircle2 size={14} /> Approve Transfer
+                        </button>
+                        <button onClick={() => handleReviewRecovery(req.id, false)} disabled={recoveryLoading}
+                          className="btn btn-sm bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20">
+                          <XCircle size={14} /> Reject
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : activeTab === 'admins' ? (
+            <div className="space-y-6">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <UserPlus size={18} className="text-brand-400" /> Admin / Election Officer Setup
+              </h3>
+
+              {/* Current Admins */}
+              <div className="rounded-xl border border-surface-700/30 bg-surface-800/20 p-5">
+                <h4 className="text-sm font-semibold text-surface-300 uppercase tracking-wider mb-3">
+                  Current Election Officers ({adminList.length})
+                </h4>
+                {adminList.length > 0 ? (
+                  <div className="space-y-2">
+                    {adminList.map((admin, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-surface-800/40 rounded-lg p-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-brand-500/10 flex items-center justify-center">
+                            <ShieldCheck size={16} className="text-brand-400" />
+                          </div>
+                          <div>
+                            <p className="text-sm font-mono text-surface-300 truncate max-w-[300px]">{admin.toString()}</p>
+                            {idx === 0 && <span className="text-xs text-brand-400">Super Admin (Deployer)</span>}
+                          </div>
+                        </div>
+                        <button onClick={() => copyToClipboard(admin.toString())}
+                          className="btn btn-sm btn-ghost">
+                          {copiedPrincipal === admin.toString() ? <><CheckCircle2 size={12} className="text-green-400" /> Copied</> : <><Copy size={12} /> Copy</>}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-surface-500 text-sm">No admins found.</p>
+                )}
+              </div>
+
+              {/* Add New Admin */}
+              <div className="rounded-xl border border-surface-700/30 bg-surface-800/20 p-5">
+                <h4 className="text-white font-semibold mb-1">Add New Election Officer</h4>
+                <p className="text-surface-500 text-sm mb-4">
+                  Only the Super Admin (first admin / deployer) can add new officers.
+                  The new officer must log in with Internet Identity first and share their Principal ID.
+                </p>
+                <form onSubmit={handleAddAdmin} className="space-y-3">
+                  <div>
+                    <label className="label">New Admin's Principal ID</label>
+                    <input type="text" value={newAdminPrincipal}
+                      onChange={e => setNewAdminPrincipal(e.target.value)}
+                      placeholder="xxxxx-xxxxx-xxxxx-xxxxx-xxxxx-..."
+                      className="input font-mono text-sm" required />
+                  </div>
+                  <button type="submit" disabled={adminLoading || !newAdminPrincipal.trim()}
+                    className="btn btn-primary">
+                    {adminLoading ? 'Adding...' : <><UserPlus size={16} /> Add Election Officer</>}
+                  </button>
+                </form>
+              </div>
+
+              {/* Help */}
+              <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4">
+                <div className="flex gap-3">
+                  <AlertCircle size={18} className="text-blue-400 shrink-0 mt-0.5" />
+                  <div className="text-sm text-surface-300 space-y-1">
+                    <p className="font-medium text-blue-300">How to add a new admin</p>
+                    <p>1. The new officer opens this site and clicks <strong className="text-white">Get Started</strong> to log in with Internet Identity.</p>
+                    <p>2. After logging in, they go to <strong className="text-white">Settings → Account</strong> and copy their Principal ID.</p>
+                    <p>3. Paste that Principal ID above and click "Add Election Officer".</p>
+                    <p>4. The new officer refreshes their page — they'll now see the Admin Dashboard.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'sms' ? (
+            <div className="space-y-6">
+              {/* Current Status */}
+              <div className="rounded-xl border border-surface-700/30 bg-surface-800/20 p-5">
+                <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
+                  <MessageSquare size={18} /> SMS Gateway Status
+                </h3>
+                {smsStatus ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${smsStatus.enabled ? 'bg-green-500' : 'bg-red-500'}`} />
+                      <span className="text-surface-300">
+                        {smsStatus.enabled ? 'SMS Enabled' : 'SMS Disabled (Demo Mode)'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-3 h-3 rounded-full ${smsStatus.configured ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                      <span className="text-surface-300">
+                        {smsStatus.configured ? 'API Key Set' : 'No API Key'}
+                      </span>
+                    </div>
+                    <div className="text-surface-400 text-sm truncate" title={smsStatus.gateway}>
+                      Gateway: {smsStatus.gateway}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-surface-500">Loading SMS status...</p>
+                )}
+                {smsStatus?.enabled && (
+                  <button onClick={handleSmsDisable} disabled={smsLoading}
+                    className="mt-4 btn btn-danger text-sm">
+                    {smsLoading ? 'Updating...' : 'Disable SMS (Switch to Demo Mode)'}
+                  </button>
+                )}
+              </div>
+
+              {/* Configure Form */}
+              <div className="rounded-xl border border-surface-700/30 bg-surface-800/20 p-5">
+                <h3 className="text-white font-semibold mb-1">Configure SMS Gateway</h3>
+                <p className="text-surface-500 text-sm mb-4">
+                  Enter your Fast2SMS API key to enable real OTP delivery to mobile phones.
+                  Get your API key from <span className="text-brand-400">fast2sms.com</span>
+                </p>
+                <form onSubmit={handleSmsConfig} className="space-y-4">
+                  <div>
+                    <label className="label">API Key *</label>
+                    <input type="password" required value={smsApiKey}
+                      onChange={e => setSmsApiKey(e.target.value)}
+                      placeholder="Enter your Fast2SMS API key"
+                      className="input" autoComplete="off" />
+                  </div>
+                  <div>
+                    <label className="label">Gateway URL (optional)</label>
+                    <input type="url" value={smsGatewayUrl}
+                      onChange={e => setSmsGatewayUrl(e.target.value)}
+                      placeholder="https://www.fast2sms.com/dev/bulkV2"
+                      className="input" />
+                    <p className="text-xs text-surface-500 mt-1">
+                      Leave default for Fast2SMS. Change only if using a different SMS provider.
+                    </p>
+                  </div>
+                  <button type="submit" disabled={smsLoading || !smsApiKey}
+                    className="btn btn-primary">
+                    {smsLoading ? 'Saving...' : 'Enable SMS & Save'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Info */}
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+                <div className="flex gap-3">
+                  <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-sm text-surface-300 space-y-1">
+                    <p className="font-medium text-amber-300">How it works</p>
+                    <p>When SMS is enabled, OTPs are sent to the voter's mobile via Fast2SMS using IC HTTPS outcalls (on-chain HTTP requests).</p>
+                    <p>When SMS is disabled (demo mode), OTPs are shown directly on screen for testing.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
           ) : (
             allCitizens.length === 0 ? (
               <div className="text-center py-16">

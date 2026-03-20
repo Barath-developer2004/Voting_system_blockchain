@@ -10,10 +10,28 @@ function Elections({ isAdmin }) {
   const [results, setResults] = useState(null);
   const [hasVoted, setHasVoted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [submittingVote, setSubmittingVote] = useState(false);
   const [showAddCandidate, setShowAddCandidate] = useState(false);
   const [showBiometricVerification, setShowBiometricVerification] = useState(false);
   const [pendingVote, setPendingVote] = useState(null);
   const [voteReceipt, setVoteReceipt] = useState(null);
+
+  // Map backend errors to user-friendly messages
+  const getUserFriendlyError = (err) => {
+    if (!err) return 'An unexpected error occurred. Please try again.';
+    const msg = typeof err === 'string' ? err : err.message || String(err);
+    if (msg.includes('not registered')) return 'You need to register as a citizen first.';
+    if (msg.includes('not verified')) return 'Your registration is pending verification by an Election Officer.';
+    if (msg.includes('rejected')) return 'Your registration was rejected. Contact the Election Commission.';
+    if (msg.includes('suspended')) return 'Your account is suspended. Contact the Election Commission.';
+    if (msg.includes('not eligible')) return 'You are not eligible to vote.';
+    if (msg.includes('already voted')) return 'You have already voted in this election.';
+    if (msg.includes('not started')) return 'Voting has not started yet for this election.';
+    if (msg.includes('ended') || msg.includes('closed')) return 'Voting has ended for this election.';
+    if (msg.includes('constituency')) return 'You are not in the constituency for this election.';
+    if (msg.includes('Biometric')) return msg; // Biometric messages are already user-friendly
+    return msg;
+  };
 
   const generateVoteRef = (electionId) => {
     const now = new Date();
@@ -50,7 +68,7 @@ function Elections({ isAdmin }) {
     try {
       setLoading(true);
       const citizenProfile = await api.getMyCitizenProfile();
-      if (citizenProfile.err) { alert(citizenProfile.err + '\n\nPlease register as a citizen first.'); setLoading(false); return; }
+      if (citizenProfile.err) { alert(getUserFriendlyError(citizenProfile.err)); setLoading(false); return; }
       const statusKey = Object.keys(citizenProfile.ok?.status || {})[0];
       if (statusKey !== 'Verified') { alert('Your status: ' + statusKey + '\nPlease wait for verification.'); setLoading(false); return; }
       const candidate = candidates.find(c => c.id === candidateId);
@@ -62,10 +80,22 @@ function Elections({ isAdmin }) {
 
   const handleBiometricVerified = async () => {
     if (!pendingVote) return;
+    setSubmittingVote(true);
     try {
-      const result = await api.castVote(selectedElection.id, pendingVote.candidateId);
-      setShowBiometricVerification(false);
-      if (result.ok) {
+      console.log('🗳️ Submitting vote for election:', selectedElection.id, 'candidate:', pendingVote.candidateId);
+      
+      // Add a timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Vote submission timed out. Please try again.')), 30000)
+      );
+      
+      const castVotePromise = api.castVote(selectedElection.id, pendingVote.candidateId);
+      const result = await Promise.race([castVotePromise, timeoutPromise]);
+      
+      console.log('📦 Vote result:', result);
+      
+      if (result && result.ok) {
+        console.log('✅ Vote submitted successfully:', result.ok);
         const candidate = candidates.find(c => c.id === pendingVote.candidateId);
         setVoteReceipt({
           electionTitle: selectedElection.title,
@@ -76,16 +106,29 @@ function Elections({ isAdmin }) {
           referenceId: generateVoteRef(selectedElection.id),
           message: result.ok
         });
+        // Immediately mark that user has voted to prevent UI from showing vote button
+        setHasVoted(true);
+        // Keep biometric modal visible while showing receipt
+        setSubmittingVote(false);
+      } else if (result && result.err) {
+        console.error('❌ Vote failed:', result.err);
         setPendingVote(null);
-        await loadElectionDetails();
-      } else if (result.err) {
+        setShowBiometricVerification(false);
+        setSubmittingVote(false);
+        alert(getUserFriendlyError(result.err));
+      } else {
+        console.error('❌ Unexpected result format:', result);
         setPendingVote(null);
-        alert('Voting Failed: ' + result.err);
+        setShowBiometricVerification(false);
+        setSubmittingVote(false);
+        alert('Unexpected response from blockchain. Please try again.');
       }
     } catch (error) {
-      setShowBiometricVerification(false);
+      console.error('❌ Vote submission error:', error);
       setPendingVote(null);
-      alert('Error: ' + error.message);
+      setShowBiometricVerification(false);
+      setSubmittingVote(false);
+      alert(getUserFriendlyError(error));
     }
   };
 
@@ -203,7 +246,7 @@ function Elections({ isAdmin }) {
     <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
       {showBiometricVerification && pendingVote && (
         <BiometricVerificationModal onVerified={handleBiometricVerified} onCancel={handleBiometricCancelled}
-          candidateName={pendingVote.candidateName} electionTitle={selectedElection?.title || 'Election'} />
+          candidateName={pendingVote.candidateName} electionTitle={selectedElection?.title || 'Election'} submittingVote={submittingVote} />
       )}
 
       {/* Vote Receipt Modal */}
@@ -267,7 +310,12 @@ function Elections({ isAdmin }) {
                   Copy Receipt
                 </button>
                 <button
-                  onClick={() => setVoteReceipt(null)}
+                  onClick={async () => {
+                    setVoteReceipt(null);
+                    setShowBiometricVerification(false);
+                    setPendingVote(null);
+                    await loadElectionDetails();
+                  }}
                   className="btn btn-primary btn-sm flex-1">
                   Done
                 </button>

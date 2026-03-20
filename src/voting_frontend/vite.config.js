@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
@@ -32,9 +33,27 @@ function loadDfxEnv() {
 
 const dfxEnv = loadDfxEnv();
 
+// Fail loudly if critical env vars are missing during production build
+const isProductionBuild = (dfxEnv.DFX_NETWORK === 'ic') || (process.env.NODE_ENV === 'production');
+if (isProductionBuild) {
+    if (!dfxEnv.CANISTER_ID_VOTING_BACKEND) {
+        throw new Error(
+            '\n\n❌ BUILD ERROR: CANISTER_ID_VOTING_BACKEND is not set.\n' +
+            '   Run: dfx deploy --network ic && bash generate-env.sh\n'
+        );
+    }
+    if (!dfxEnv.DFX_NETWORK) {
+        throw new Error(
+            '\n\n❌ BUILD ERROR: DFX_NETWORK is not set in .env file.\n' +
+            '   Run: bash generate-env.sh after deploying.\n'
+        );
+    }
+}
+
 export default defineConfig({
     plugins: [
         react(),
+        nodePolyfills({ include: ['buffer', 'stream', 'crypto', 'util'] }),
     ],
     define: {
         'global': 'globalThis',

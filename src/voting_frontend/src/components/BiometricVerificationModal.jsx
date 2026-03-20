@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Fingerprint, X, Shield, CheckCircle2, XCircle, AlertTriangle, Loader2, Lock, Blocks, CreditCard } from 'lucide-react';
 import * as api from '../service';
 
-function BiometricVerificationModal({ onVerified, onCancel, candidateName, electionTitle }) {
+function BiometricVerificationModal({ onVerified, onCancel, candidateName, electionTitle, submittingVote }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
   const [isEnrolled] = useState(api.isBiometricEnrolled());
@@ -34,11 +34,14 @@ function BiometricVerificationModal({ onVerified, onCancel, candidateName, elect
       }
 
       const principalId = await api.getPrincipal();
-      let storedCredential = localStorage.getItem(`biometric_credential_${principalId}`);
+      // Check sessionStorage first (where enrollment stores it), then localStorage as fallback
+      let storedCredential = sessionStorage.getItem(`biometric_credential_${principalId}`);
+      if (!storedCredential) {
+        storedCredential = localStorage.getItem(`biometric_credential_${principalId}`);
+      }
       if (!storedCredential) {
         const legacyCredential = localStorage.getItem('biometric_credential');
         if (!legacyCredential) throw new Error('Biometric credential not found. Please register your fingerprint first.');
-        localStorage.setItem(`biometric_credential_${principalId}`, legacyCredential);
         storedCredential = legacyCredential;
       }
 
@@ -64,8 +67,18 @@ function BiometricVerificationModal({ onVerified, onCancel, candidateName, elect
       if (!verifyResult || !verifyResult.ok) throw new Error('Blockchain verification failed.');
 
       localStorage.setItem(`biometric_session_${principalId}`, JSON.stringify({ verified: true, timestamp: Date.now(), credentialId: credentialData.id }));
-      setMessage({ type: 'success', text: 'Identity verified! Proceeding with vote...' });
-      setTimeout(() => onVerified(), 1000);
+      setMessage({ type: 'success', text: 'Identity verified! Recording your vote...' });
+      
+      // Delay briefly to allow state to settle, then call onVerified
+      setTimeout(async () => {
+        try {
+          await onVerified();
+        } catch (err) {
+          console.error('Error calling onVerified:', err);
+          setMessage({ type: 'error', text: `Failed to submit vote: ${err.message}` });
+          setLoading(false);
+        }
+      }, 500);
     } catch (error) {
       if (error.name === 'NotAllowedError') setMessage({ type: 'error', text: 'Verification was cancelled or timed out' });
       else setMessage({ type: 'error', text: `Verification failed: ${error.message}` });
@@ -79,7 +92,7 @@ function BiometricVerificationModal({ onVerified, onCancel, candidateName, elect
         <div className="h-1 bg-gradient-to-r from-brand-500 via-purple-500 to-brand-500" />
 
         {/* Close button */}
-        <button onClick={onCancel} disabled={loading} className="absolute top-4 right-4 text-surface-500 hover:text-white transition-colors">
+        <button onClick={onCancel} disabled={loading || submittingVote} className="absolute top-4 right-4 text-surface-500 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
           <X size={18} />
         </button>
 
@@ -135,9 +148,10 @@ function BiometricVerificationModal({ onVerified, onCancel, candidateName, elect
 
           {/* Actions */}
           <div className="space-y-3">
-            <button onClick={handleBiometricVerification} disabled={loading}
+            <button onClick={handleBiometricVerification} disabled={loading || submittingVote}
               className="btn btn-primary w-full btn-lg group">
               {loading ? <><Loader2 size={18} className="animate-spin" /> Verifying...</> :
+               submittingVote ? <><Loader2 size={18} className="animate-spin" /> Submitting Vote...</> :
                 <><Fingerprint size={18} className="group-hover:scale-110 transition-transform" /> Verify with Fingerprint</>}
             </button>
 

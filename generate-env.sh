@@ -8,10 +8,23 @@ echo "🔧 Generating environment variables..."
 # Get network (default: local)
 NETWORK="${DFX_NETWORK:-local}"
 
+# Auto-detect mainnet from --network ic flag if passed
+for arg in "$@"; do
+    if [ "$arg" = "--network" ] || [ "$arg" = "ic" ]; then
+        NETWORK="ic"
+    fi
+done
+
 # Read canister IDs from dfx
-BACKEND_ID=$(dfx canister id voting_backend 2>/dev/null)
-II_ID=$(dfx canister id internet_identity 2>/dev/null)
-FRONTEND_ID=$(dfx canister id voting_frontend 2>/dev/null)
+if [ "$NETWORK" = "ic" ]; then
+    BACKEND_ID=$(dfx canister id voting_backend --network ic 2>/dev/null)
+    II_ID="rdmx6-jaaaa-aaaaa-aaadq-cai"  # Official mainnet Internet Identity
+    FRONTEND_ID=$(dfx canister id voting_frontend --network ic 2>/dev/null)
+else
+    BACKEND_ID=$(dfx canister id voting_backend 2>/dev/null)
+    II_ID=$(dfx canister id internet_identity 2>/dev/null)
+    FRONTEND_ID=$(dfx canister id voting_frontend 2>/dev/null)
+fi
 
 if [ -z "$BACKEND_ID" ]; then
     echo "❌ Could not get voting_backend canister ID. Did you run 'dfx deploy'?"
@@ -43,7 +56,15 @@ echo "   CANISTER_ID_VOTING_FRONTEND  = ${FRONTEND_ID}"
 echo "   CANISTER_ID_INTERNET_IDENTITY = ${II_ID}"
 echo ""
 
-if [ "$NETWORK" = "local" ]; then
+if [ "$NETWORK" = "ic" ]; then
+    echo "🌐 Mainnet Frontend URL: https://${FRONTEND_ID}.ic0.app"
+    echo "🔑 Internet Identity:    https://identity.ic0.app"
+    echo ""
+    echo "⚠️  IMPORTANT: Rebuild the frontend after generating env:"
+    echo "   cd src/voting_frontend && npm run build && cd ../.."
+    echo "   dfx deploy voting_frontend --network ic"
+    echo ""
+elif [ "$NETWORK" = "local" ]; then
     echo "🌐 Frontend URL:  http://127.0.0.1:4943/?canisterId=${FRONTEND_ID}"
     echo "🔑 Internet Identity URL: http://${II_ID}.localhost:4943"
     echo ""

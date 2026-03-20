@@ -7,11 +7,15 @@ import Time "mo:base/Time";
 import Text "mo:base/Text";
 import Nat "mo:base/Nat";
 import Nat32 "mo:base/Nat32";
+import Nat64 "mo:base/Nat64";
 import Option "mo:base/Option";
 import Result "mo:base/Result";
 import Int "mo:base/Int";
 import Hash "mo:base/Hash";
 import Char "mo:base/Char";
+import Blob "mo:base/Blob";
+import Random "mo:base/Random";
+import Nat8 "mo:base/Nat8";
 
 persistent actor VotingSystem {
     // Type aliases
@@ -34,7 +38,21 @@ persistent actor VotingSystem {
     private stable var aadhaarRegistry : [Text] = [];
     private stable var biometricsEntries : [(Principal, BiometricCredential)] = [];
     private stable var aadhaarOTPEntries : [(Text, Types.AadhaarOTPRecord)] = [];
+    private stable var otpRateLimitEntries : [(Principal, [Int])] = [];
     
+    // SMS gateway configuration (admin-configurable)
+    private stable var smsApiKey : Text = "";
+    private stable var smsEnabled : Bool = false;
+    private stable var smsGatewayUrl : Text = "https://www.fast2sms.com/dev/bulkV2";
+
+    // Development mode — allows OTP fallback when SMS fails (local replica cannot make HTTPS outcalls)
+    // MUST be disabled before mainnet deployment!
+    private stable var devMode : Bool = true;
+
+    // Account recovery
+    private stable var recoveryRequestsEntries : [(Nat, Types.RecoveryRequest)] = [];
+    private stable var nextRecoveryId : Nat = 1;
+
     private stable var nextElectionId : Nat = 1;
     private stable var nextCandidateId : Nat = 1;
     private stable var initialized : Bool = false;
@@ -56,6 +74,26 @@ persistent actor VotingSystem {
     private transient var admins : [Principal] = [];
     private transient var biometrics = HashMap.HashMap<Principal, BiometricCredential>(10, Principal.equal, Principal.hash);
     private transient var aadhaarOTPs = HashMap.HashMap<Text, Types.AadhaarOTPRecord>(10, Text.equal, Text.hash);
+    private transient var otpRateLimits = HashMap.HashMap<Principal, [Int]>(10, Principal.equal, Principal.hash);
+    private transient var recoveryRequests = HashMap.HashMap<Nat, Types.RecoveryRequest>(10, Nat.equal, natHash);
+
+    // Management canister interface for IC HTTPS outcalls (SMS) and controller checks
+    let ic : actor {
+        http_request : Types.HttpRequestArgs -> async Types.HttpResponsePayload;
+        canister_status : { canister_id : Principal } -> async { settings : { controllers : [Principal] } };
+    } = actor "aaaaa-aa";
+
+    // Check if a principal is a canister controller (deployer)
+    private func checkIsController(caller : Principal) : async Bool {
+        try {
+            let status = await ic.canister_status({ canister_id = Principal.fromActor(VotingSystem) });
+            Option.isSome(Array.find(status.settings.controllers, func(c : Principal) : Bool {
+                Principal.equal(c, caller)
+            }))
+        } catch (_) {
+            false
+        }
+    };
 
     // System initialization
     system func preupgrade() {
@@ -67,6 +105,8 @@ persistent actor VotingSystem {
         adminsArray := admins;
         biometricsEntries := Iter.toArray(biometrics.entries());
         aadhaarOTPEntries := Iter.toArray(aadhaarOTPs.entries());
+        otpRateLimitEntries := Iter.toArray(otpRateLimits.entries());
+        recoveryRequestsEntries := Iter.toArray(recoveryRequests.entries());
     };
 
     system func postupgrade() {
@@ -79,17 +119,21 @@ persistent actor VotingSystem {
         initialized := Array.size(admins) > 0;
         biometrics := HashMap.fromIter<Principal, BiometricCredential>(biometricsEntries.vals(), 10, Principal.equal, Principal.hash);
         aadhaarOTPs := HashMap.fromIter<Text, Types.AadhaarOTPRecord>(aadhaarOTPEntries.vals(), 10, Text.equal, Text.hash);
+        otpRateLimits := HashMap.fromIter<Principal, [Int]>(otpRateLimitEntries.vals(), 10, Principal.equal, Principal.hash);
+        recoveryRequests := HashMap.fromIter<Nat, Types.RecoveryRequest>(recoveryRequestsEntries.vals(), 10, Nat.equal, natHash);
         
         citizensEntries := [];
         electionsEntries := [];
         candidatesEntries := [];
         biometricsEntries := [];
         aadhaarOTPEntries := [];
+        otpRateLimitEntries := [];
+        recoveryRequestsEntries := [];
     };
 
     // ============ SYSTEM INITIALIZATION ============
-    // The FIRST person to call initialize() becomes the admin.
-    // After that, no one else can call it.
+    // SECURITY: Only canister controllers (the deployer's dfx identity) can initialize.
+    // This prevents random visitors from claiming admin.
     //
     // Usage after deploy:
     //   dfx canister call voting_backend initialize
@@ -102,11 +146,17 @@ persistent actor VotingSystem {
             return #ok("System already initialized. Admin exists: " # Principal.toText(admins[0]))
         };
 
-        // First caller becomes the admin
+        // SECURITY: Only canister controllers (deployer) can initialize
+        let isController = await checkIsController(msg.caller);
+        if (not isController) {
+            return #err("Access denied. Only the canister deployer (controller) can initialize. Run from CLI: dfx canister call voting_backend initialize")
+        };
+
+        // Controller verified — make them the admin
         admins := [msg.caller];
         initialized := true;
 
-        logAudit(msg.caller, "SYSTEM_INITIALIZED", ?msg.caller, "First admin set via initialize()");
+        logAudit(msg.caller, "SYSTEM_INITIALIZED", ?msg.caller, "First admin set via initialize() — controller verified");
 
         #ok("You are now the admin. Your Principal: " # Principal.toText(msg.caller))
     };
@@ -241,7 +291,50 @@ persistent actor VotingSystem {
     // Helper: Validate mobile number
     private func isValidMobile(mobile : Text) : Bool {
         let size = Text.size(mobile);
-        size >= 10 and size <= 15
+        if (size < 10 or size > 15) { return false };
+        for (c in Text.toIter(mobile)) {
+            if (c != '+' and (c < '0' or c > '9')) { return false };
+        };
+        true
+    };
+
+    // Helper: Validate that Aadhaar is exactly 12 digits (not just 12 characters)
+    private func isValidAadhaar(aadhaar : Text) : Bool {
+        if (Text.size(aadhaar) != 12) { return false };
+        for (c in Text.toIter(aadhaar)) {
+            if (c < '0' or c > '9') { return false };
+        };
+        true
+    };
+
+    // Helper: OTP rate limiting — max 3 requests per 10 minutes per caller
+    private func checkOTPRateLimit(caller : Principal) : Bool {
+        let now = Time.now();
+        let tenMinutes : Int = 10 * 60 * 1_000_000_000;
+        switch (otpRateLimits.get(caller)) {
+            case null { true };
+            case (?timestamps) {
+                let recent = Array.filter<Int>(timestamps, func(t : Int) : Bool {
+                    (now - t) < tenMinutes
+                });
+                Array.size(recent) < 3
+            };
+        }
+    };
+
+    // Helper: Record an OTP request timestamp for rate limiting
+    private func recordOTPRequest(caller : Principal) {
+        let now = Time.now();
+        let tenMinutes : Int = 10 * 60 * 1_000_000_000;
+        let existing = switch (otpRateLimits.get(caller)) {
+            case null { [] };
+            case (?timestamps) {
+                Array.filter<Int>(timestamps, func(t : Int) : Bool {
+                    (now - t) < tenMinutes
+                })
+            };
+        };
+        otpRateLimits.put(caller, Array.append(existing, [now]));
     };
 
     // Helper: Log audit entry
@@ -256,35 +349,75 @@ persistent actor VotingSystem {
         auditLogs := Array.append(auditLogs, [log]);
     };
 
-    // ============ AADHAAR OTP VERIFICATION (SIMULATED) ============
-    // In production, this would integrate with UIDAI's Aadhaar e-KYC API.
-    // For demo/academic purposes, we simulate the OTP flow to demonstrate
-    // the verification architecture.
+    // ============ AADHAAR OTP VERIFICATION ============
 
-    // Helper: Generate a deterministic 6-digit OTP from Aadhaar + timestamp
-    private func generateOTP(aadhaarNumber : Text) : Text {
-        let seed = Text.hash(aadhaarNumber # Int.toText(Time.now()));
-        let otp = Nat32.toNat(seed) % 1000000;
+    // Transform function for HTTPS outcalls — strips non-deterministic headers for IC consensus
+    public query func transform(raw : Types.TransformArgs) : async Types.HttpResponsePayload {
+        {
+            status = raw.response.status;
+            body = raw.response.body;
+            headers = [];
+        }
+    };
+
+    // Build the HTTP request for the SMS gateway (Fast2SMS format)
+    private func buildSmsRequest(mobileNumber : Text, otp : Text) : Types.HttpRequestArgs {
+        let url = smsGatewayUrl # "?route=otp&variables_values=" # otp # "&flash=0&numbers=" # mobileNumber;
+        {
+            url = url;
+            max_response_bytes = ?Nat64.fromNat(2048);
+            headers = [{ name = "authorization"; value = smsApiKey }];
+            body = null;
+            method = #get;
+            transform = ?{
+                function = transform;
+                context = Blob.fromArray([]);
+            };
+        }
+    };
+
+    // Helper: Generate a cryptographically random 6-digit OTP using IC's Random module
+    private func generateOTP() : async Text {
+        let entropy = await Random.blob();
+        let bytes = Blob.toArray(entropy);
+        // Combine first 4 bytes into a Nat for the OTP seed
+        var seed : Nat = 0;
+        var i = 0;
+        while (i < 4 and i < Array.size(bytes)) {
+            seed := seed * 256 + Nat8.toNat(bytes[i]);
+            i += 1;
+        };
+        let otp = seed % 1000000;
         let otpText = Nat.toText(otp);
         // Pad to 6 digits
         let padding = 6 - Text.size(otpText);
         var padded = otpText;
-        var i = 0;
-        while (i < padding) {
+        var j = 0;
+        while (j < padding) {
             padded := "0" # padded;
-            i += 1;
+            j += 1;
         };
         padded
     };
 
-    // Request Aadhaar OTP (simulated - returns OTP for demo)
+    // Request Aadhaar OTP
     public shared(msg) func requestAadhaarOTP(
         aadhaarNumber : Text,
         mobileNumber : Text
     ) : async Result<Text, Text> {
-        // Validate Aadhaar format
-        if (Text.size(aadhaarNumber) != 12) {
-            return #err("Invalid Aadhaar number format. Must be 12 digits.");
+        // Block anonymous callers
+        if (Principal.isAnonymous(msg.caller)) {
+            return #err("Authentication required. Please log in first.");
+        };
+
+        // Rate limit: max 3 OTP requests per 10 minutes
+        if (not checkOTPRateLimit(msg.caller)) {
+            return #err("Too many OTP requests. Please wait 10 minutes before trying again.");
+        };
+
+        // Validate Aadhaar format (must be exactly 12 digits)
+        if (not isValidAadhaar(aadhaarNumber)) {
+            return #err("Invalid Aadhaar number format. Must be exactly 12 digits.");
         };
 
         // Validate mobile
@@ -297,8 +430,8 @@ persistent actor VotingSystem {
             return #err("This Aadhaar number is already registered in the system!");
         };
 
-        // Generate OTP
-        let otp = generateOTP(aadhaarNumber);
+        // Generate cryptographically random OTP
+        let otp = await generateOTP();
 
         // Store OTP record
         let otpRecord : Types.AadhaarOTPRecord = {
@@ -311,12 +444,55 @@ persistent actor VotingSystem {
         };
         aadhaarOTPs.put(aadhaarNumber, otpRecord);
 
-        let firstChar : Char = switch (Text.toIter(aadhaarNumber).next()) { case (?ch) ch; case null 'X' };
-        logAudit(msg.caller, "AADHAAR_OTP_REQUESTED", null, "OTP sent for Aadhaar: " # Text.fromChar(firstChar) # "***********");
+        // Record rate limit
+        recordOTPRequest(msg.caller);
 
-        // In production: send OTP via SMS using UIDAI API
-        // For demo: return the OTP directly so the user can see it
-        #ok("OTP sent to mobile number ending in " # mobileNumber # ". [DEMO MODE - OTP: " # otp # "]")
+        // Mask the Aadhaar number in audit log
+        let lastFour = if (Text.size(aadhaarNumber) >= 4) {
+            let chars = Iter.toArray(Text.toIter(aadhaarNumber));
+            let len = Array.size(chars);
+            Text.fromIter(Array.vals([
+                chars[len - 4], chars[len - 3], chars[len - 2], chars[len - 1]
+            ]))
+        } else { "****" };
+        logAudit(msg.caller, "AADHAAR_OTP_REQUESTED", null, "OTP sent for Aadhaar: ********" # lastFour);
+
+        // Mask the mobile number in the response (show last 4 digits only)
+        let mobileLastFour = if (Text.size(mobileNumber) >= 4) {
+            let chars = Iter.toArray(Text.toIter(mobileNumber));
+            let len = Array.size(chars);
+            Text.fromIter(Array.vals([
+                chars[len - 4], chars[len - 3], chars[len - 2], chars[len - 1]
+            ]))
+        } else { "****" };
+
+        // Send OTP via SMS gateway — SMS must be configured for production
+        if (smsEnabled and Text.size(smsApiKey) > 0) {
+            let request = buildSmsRequest(mobileNumber, otp);
+            try {
+                let response = await (with cycles = 230_850_258_000) ic.http_request(request);
+                if (response.status != 200) {
+                    logAudit(msg.caller, "SMS_SEND_FAILED", null, "Gateway returned status " # Nat.toText(response.status));
+                    if (devMode) {
+                        return #ok("[DEV MODE] SMS failed. Your OTP is: " # otp)
+                    };
+                    return #err("Failed to send OTP via SMS. Please try again.");
+                };
+            } catch (_) {
+                logAudit(msg.caller, "SMS_SEND_FAILED", null, "HTTPS outcall error");
+                if (devMode) {
+                    return #ok("[DEV MODE] SMS unavailable (local replica). Your OTP is: " # otp)
+                };
+                return #err("Failed to send OTP via SMS. Please try again.");
+            };
+            #ok("OTP sent to mobile number ending in " # mobileLastFour # ". Please check your phone.")
+        } else if (devMode) {
+            // Dev mode without SMS — return OTP for local testing
+            #ok("[DEV MODE] Your OTP is: " # otp # " (configure SMS for production)")
+        } else {
+            // Production — SMS not configured, reject
+            #err("SMS gateway not configured. Please contact the Election Officer to enable OTP delivery.")
+        }
     };
 
     // Verify Aadhaar OTP
@@ -324,6 +500,10 @@ persistent actor VotingSystem {
         aadhaarNumber : Text,
         enteredOTP : Text
     ) : async Result<Text, Text> {
+        // Block anonymous callers
+        if (Principal.isAnonymous(msg.caller)) {
+            return #err("Authentication required. Please log in first.");
+        };
         switch (aadhaarOTPs.get(aadhaarNumber)) {
             case null {
                 return #err("No OTP request found. Please request an OTP first.");
@@ -394,6 +574,11 @@ persistent actor VotingSystem {
         photoUrl : Text,
         voterIdNumber : Text
     ) : async Result<Text, Text> {
+        // Block anonymous callers
+        if (Principal.isAnonymous(msg.caller)) {
+            return #err("Authentication required. Please log in first.");
+        };
+
         let principal = msg.caller;
 
         // Check if already registered
@@ -407,9 +592,9 @@ persistent actor VotingSystem {
             return #err("Voter ID number is required");
         };
 
-        // Validate Aadhaar number (12 digits)
-        if (Text.size(aadhaarNumber) != 12) {
-            return #err("Invalid Aadhaar number format. Must be 12 digits.");
+        // Validate Aadhaar number (exactly 12 digits)
+        if (not isValidAadhaar(aadhaarNumber)) {
+            return #err("Invalid Aadhaar number format. Must be exactly 12 digits.");
         };
 
         // Check for duplicate Aadhaar
@@ -442,6 +627,14 @@ persistent actor VotingSystem {
         // Validate mobile number
         if (not isValidMobile(mobileNumber)) {
             return #err("Invalid mobile number");
+        };
+
+        // Validate required photo URLs
+        if (Text.size(aadhaarPhotoUrl) == 0) {
+            return #err("Aadhaar photo is required. Please upload your Aadhaar document photo.");
+        };
+        if (Text.size(photoUrl) == 0) {
+            return #err("Your photo is required. Please upload a profile photo.");
         };
 
         // Create citizen profile
@@ -723,6 +916,11 @@ persistent actor VotingSystem {
 
     // Cast vote
     public shared(msg) func castVote(electionId : Nat, candidateId : Nat) : async Result<Text, Text> {
+        // Block anonymous callers
+        if (Principal.isAnonymous(msg.caller)) {
+            return #err("Authentication required. Please log in first.");
+        };
+
         let voterPrincipal = msg.caller;
 
         // SECURITY CHECK 1: Get citizen profile
@@ -907,7 +1105,369 @@ persistent actor VotingSystem {
         }
     };
 
+    // ============ ACCOUNT RECOVERY ============
+    // When a user loses their Internet Identity (lost device, forgot anchor),
+    // they can request to transfer their citizen profile to a new principal.
+    // Flow: Login with new II → Request recovery (Aadhaar + mobile) → OTP verify → Admin approves
+
+    // Helper: Find citizen by Aadhaar number
+    private func findCitizenByAadhaar(aadhaar : Text) : ?(Principal, Citizen) {
+        for ((p, c) in citizens.entries()) {
+            if (Text.equal(c.aadhaarNumber, aadhaar)) {
+                return ?(p, c);
+            };
+        };
+        null
+    };
+
+    // Step 1: Request recovery OTP — user provides their Aadhaar + mobile from new principal
+    public shared(msg) func requestRecoveryOTP(
+        aadhaarNumber : Text,
+        mobileNumber : Text
+    ) : async Result<Text, Text> {
+        // Block anonymous callers
+        if (Principal.isAnonymous(msg.caller)) {
+            return #err("Authentication required. Please log in first.");
+        };
+
+        // Rate limit
+        if (not checkOTPRateLimit(msg.caller)) {
+            return #err("Too many requests. Please wait 10 minutes.");
+        };
+
+        if (not isValidAadhaar(aadhaarNumber)) {
+            return #err("Invalid Aadhaar number format.");
+        };
+        if (not isValidMobile(mobileNumber)) {
+            return #err("Invalid mobile number.");
+        };
+
+        // Check caller isn't already registered as a citizen
+        switch (citizens.get(msg.caller)) {
+            case (?_) { return #err("You already have a citizen profile with this identity. No recovery needed.") };
+            case null {};
+        };
+
+        // Find the existing citizen record by Aadhaar
+        let citizenMatch = findCitizenByAadhaar(aadhaarNumber);
+        switch (citizenMatch) {
+            case null {
+                return #err("No citizen record found with this Aadhaar number.");
+            };
+            case (?(oldPrincipal, citizen)) {
+                // Verify the mobile number matches
+                if (citizen.mobileNumber != mobileNumber) {
+                    return #err("Mobile number does not match the registered record.");
+                };
+
+                // Check no pending recovery already exists for this Aadhaar
+                for ((_, req) in recoveryRequests.entries()) {
+                    switch (req.status) {
+                        case (#Pending) {
+                            if (Text.equal(req.aadhaarNumber, aadhaarNumber)) {
+                                return #err("A recovery request is already pending for this Aadhaar. Please wait for admin review.");
+                            };
+                        };
+                        case _ {};
+                    };
+                };
+
+                // Generate cryptographically random OTP
+                let otp = await generateOTP();
+                let otpRecord : Types.AadhaarOTPRecord = {
+                    aadhaarNumber = aadhaarNumber;
+                    otp = otp;
+                    mobileNumber = mobileNumber;
+                    generatedAt = Time.now();
+                    verified = false;
+                    attempts = 0;
+                };
+                aadhaarOTPs.put("recovery_" # aadhaarNumber, otpRecord);
+                recordOTPRequest(msg.caller);
+
+                // Mask mobile for response
+                let mobileLastFour = if (Text.size(mobileNumber) >= 4) {
+                    let chars = Iter.toArray(Text.toIter(mobileNumber));
+                    let len = Array.size(chars);
+                    Text.fromIter(Array.vals([
+                        chars[len - 4], chars[len - 3], chars[len - 2], chars[len - 1]
+                    ]))
+                } else { "****" };
+
+                logAudit(msg.caller, "RECOVERY_OTP_REQUESTED", ?oldPrincipal, "Recovery OTP for Aadhaar ending ****" # mobileLastFour);
+
+                // Send OTP via SMS — SMS must be configured for production
+                if (smsEnabled and Text.size(smsApiKey) > 0) {
+                    let request = buildSmsRequest(mobileNumber, otp);
+                    try {
+                        let response = await (with cycles = 230_850_258_000) ic.http_request(request);
+                        if (response.status != 200) {
+                            if (devMode) {
+                                return #ok("[DEV MODE] SMS failed. Recovery OTP is: " # otp)
+                            };
+                            return #err("Failed to send recovery OTP. Please try again.");
+                        };
+                    } catch (_) {
+                        if (devMode) {
+                            return #ok("[DEV MODE] SMS unavailable. Recovery OTP is: " # otp)
+                        };
+                        return #err("Failed to send recovery OTP. Please try again.");
+                    };
+                    #ok("Recovery OTP sent to mobile ending in " # mobileLastFour # ". Check your phone.")
+                } else if (devMode) {
+                    #ok("[DEV MODE] Recovery OTP is: " # otp # " (configure SMS for production)")
+                } else {
+                    #err("SMS gateway not configured. Please contact the Election Officer to enable OTP delivery.")
+                }
+            };
+        }
+    };
+
+    // Step 2: Verify recovery OTP and create the recovery request
+    public shared(msg) func verifyRecoveryOTP(
+        aadhaarNumber : Text,
+        enteredOTP : Text
+    ) : async Result<Text, Text> {
+        // Block anonymous callers
+        if (Principal.isAnonymous(msg.caller)) {
+            return #err("Authentication required. Please log in first.");
+        };
+        let otpKey = "recovery_" # aadhaarNumber;
+        switch (aadhaarOTPs.get(otpKey)) {
+            case null {
+                return #err("No recovery OTP request found. Please request one first.");
+            };
+            case (?otpRecord) {
+                if (otpRecord.verified) {
+                    return #err("OTP already verified. Your recovery request is pending admin review.");
+                };
+                if (otpRecord.attempts >= 5) {
+                    aadhaarOTPs.delete(otpKey);
+                    return #err("Too many failed attempts. Please request a new OTP.");
+                };
+
+                let fiveMinutes : Int = 5 * 60 * 1_000_000_000;
+                if (Time.now() - otpRecord.generatedAt > fiveMinutes) {
+                    aadhaarOTPs.delete(otpKey);
+                    return #err("OTP has expired. Please request a new one.");
+                };
+
+                if (enteredOTP != otpRecord.otp) {
+                    let updated : Types.AadhaarOTPRecord = {
+                        aadhaarNumber = otpRecord.aadhaarNumber;
+                        otp = otpRecord.otp;
+                        mobileNumber = otpRecord.mobileNumber;
+                        generatedAt = otpRecord.generatedAt;
+                        verified = false;
+                        attempts = otpRecord.attempts + 1;
+                    };
+                    aadhaarOTPs.put(otpKey, updated);
+                    return #err("Invalid OTP. " # Nat.toText(4 - otpRecord.attempts) # " attempts remaining.");
+                };
+
+                // Mark OTP verified
+                let verified : Types.AadhaarOTPRecord = {
+                    aadhaarNumber = otpRecord.aadhaarNumber;
+                    otp = otpRecord.otp;
+                    mobileNumber = otpRecord.mobileNumber;
+                    generatedAt = otpRecord.generatedAt;
+                    verified = true;
+                    attempts = otpRecord.attempts;
+                };
+                aadhaarOTPs.put(otpKey, verified);
+
+                // Find old principal
+                let citizenMatch = findCitizenByAadhaar(aadhaarNumber);
+                switch (citizenMatch) {
+                    case null { return #err("Citizen record not found.") };
+                    case (?(oldPrincipal, _)) {
+                        // Create recovery request for admin review
+                        let reqId = nextRecoveryId;
+                        nextRecoveryId += 1;
+
+                        let recoveryReq : Types.RecoveryRequest = {
+                            id = reqId;
+                            aadhaarNumber = aadhaarNumber;
+                            mobileNumber = otpRecord.mobileNumber;
+                            oldPrincipal = oldPrincipal;
+                            newPrincipal = msg.caller;
+                            otpVerified = true;
+                            status = #Pending;
+                            requestedAt = Time.now();
+                            reviewedBy = null;
+                            reviewedAt = null;
+                        };
+                        recoveryRequests.put(reqId, recoveryReq);
+
+                        logAudit(msg.caller, "RECOVERY_OTP_VERIFIED", ?oldPrincipal, "Recovery request #" # Nat.toText(reqId) # " created");
+
+                        #ok("OTP verified! Your recovery request (#" # Nat.toText(reqId) # ") has been submitted for admin review. You will regain access once approved.")
+                    };
+                };
+            };
+        }
+    };
+
+    // Admin: Get pending recovery requests
+    public query(msg) func getPendingRecoveryRequests() : async Result<[Types.RecoveryRequest], Text> {
+        if (not isAdmin(msg.caller)) {
+            return #err("Only Election Officers can view recovery requests");
+        };
+        let pending = Array.filter<Types.RecoveryRequest>(
+            Iter.toArray(recoveryRequests.vals()),
+            func(r : Types.RecoveryRequest) : Bool {
+                switch (r.status) {
+                    case (#Pending) { true };
+                    case _ { false };
+                }
+            }
+        );
+        #ok(pending)
+    };
+
+    // Admin: Approve or reject a recovery request
+    public shared(msg) func reviewRecoveryRequest(
+        requestId : Nat,
+        approve : Bool
+    ) : async Result<Text, Text> {
+        if (not isAdmin(msg.caller)) {
+            return #err("Only Election Officers can review recovery requests");
+        };
+
+        switch (recoveryRequests.get(requestId)) {
+            case null { return #err("Recovery request not found") };
+            case (?req) {
+                switch (req.status) {
+                    case (#Pending) {};
+                    case _ { return #err("This request has already been reviewed") };
+                };
+
+                if (not req.otpVerified) {
+                    return #err("OTP was not verified for this request");
+                };
+
+                if (approve) {
+                    // Transfer the citizen record from old principal to new principal
+                    switch (citizens.get(req.oldPrincipal)) {
+                        case null { return #err("Original citizen record not found") };
+                        case (?citizen) {
+                            // Create updated citizen with new principal
+                            let updatedCitizen : Citizen = {
+                                citizen with
+                                principal = req.newPrincipal;
+                                lastUpdated = Time.now();
+                            };
+
+                            // Remove old entry, add new one
+                            citizens.delete(req.oldPrincipal);
+                            citizens.put(req.newPrincipal, updatedCitizen);
+
+                            // Transfer biometric (delete old, user will re-enroll)
+                            biometrics.delete(req.oldPrincipal);
+
+                            // Update vote records — keep the history but voter can now use new principal
+                            // (votes are immutable, linked to old principal — this is by design for audit)
+
+                            // Update recovery request status
+                            let updatedReq : Types.RecoveryRequest = {
+                                req with
+                                status = #Approved;
+                                reviewedBy = ?msg.caller;
+                                reviewedAt = ?Time.now();
+                            };
+                            recoveryRequests.put(requestId, updatedReq);
+
+                            // Clean up recovery OTP
+                            aadhaarOTPs.delete("recovery_" # req.aadhaarNumber);
+
+                            logAudit(msg.caller, "RECOVERY_APPROVED", ?req.newPrincipal,
+                                "Account transferred from " # Principal.toText(req.oldPrincipal) # " to " # Principal.toText(req.newPrincipal));
+
+                            #ok("Recovery approved. Citizen profile transferred to new identity.")
+                        };
+                    };
+                } else {
+                    let updatedReq : Types.RecoveryRequest = {
+                        req with
+                        status = #Rejected;
+                        reviewedBy = ?msg.caller;
+                        reviewedAt = ?Time.now();
+                    };
+                    recoveryRequests.put(requestId, updatedReq);
+
+                    logAudit(msg.caller, "RECOVERY_REJECTED", ?req.newPrincipal,
+                        "Recovery request #" # Nat.toText(requestId) # " rejected");
+
+                    #ok("Recovery request rejected.")
+                };
+            };
+        }
+    };
+
+    // User: Check recovery request status by Aadhaar
+    public query(msg) func getMyRecoveryStatus(aadhaarNumber : Text) : async Result<{ status : Text; requestId : Nat }, Text> {
+        for ((_, req) in recoveryRequests.entries()) {
+            if (Text.equal(req.aadhaarNumber, aadhaarNumber) and Principal.equal(req.newPrincipal, msg.caller)) {
+                let statusText = switch (req.status) {
+                    case (#Pending) { "pending" };
+                    case (#Approved) { "approved" };
+                    case (#Rejected) { "rejected" };
+                };
+                return #ok({ status = statusText; requestId = req.id });
+            };
+        };
+        #err("No recovery request found for this Aadhaar number.")
+    };
+
     // ============ ADMIN MANAGEMENT ============
+
+    // Configure SMS gateway (Super Admin only)
+    // Call this after deployment to enable real OTP delivery:
+    //   dfx canister call voting_backend configureSms '("YOUR_FAST2SMS_API_KEY", true, null)'
+    // To use a custom gateway URL:
+    //   dfx canister call voting_backend configureSms '("API_KEY", true, opt "https://custom-gateway.com/api")'
+    public shared(msg) func configureSms(apiKey : Text, enabled : Bool, gatewayUrl : ?Text) : async Result<Text, Text> {
+        if (not isSuperAdmin(msg.caller)) {
+            return #err("Only Super Admin can configure SMS settings");
+        };
+
+        smsApiKey := apiKey;
+        smsEnabled := enabled;
+        switch (gatewayUrl) {
+            case (?url) { smsGatewayUrl := url };
+            case null {};
+        };
+
+        logAudit(msg.caller, "SMS_CONFIGURED", null, "SMS gateway " # (if (enabled) "enabled" else "disabled"));
+        #ok("SMS configuration updated. SMS is now " # (if (enabled) "ENABLED" else "DISABLED"))
+    };
+
+    // Toggle development mode (Super Admin only)
+    // Dev mode allows OTP fallback when SMS fails (needed for local testing)
+    // MUST be disabled before mainnet deployment!
+    public shared(msg) func setDevMode(enabled : Bool) : async Result<Text, Text> {
+        if (not isSuperAdmin(msg.caller)) {
+            return #err("Only Super Admin can toggle development mode");
+        };
+
+        devMode := enabled;
+        logAudit(msg.caller, "DEV_MODE_TOGGLED", null, "Dev mode " # (if (enabled) "ENABLED" else "DISABLED"));
+        #ok("Development mode is now " # (if (enabled) "ON ⚠️ (disable before mainnet!)" else "OFF ✅ (production-safe)"))
+    };
+
+    // Check SMS gateway status (Admin only — does not expose API key)
+    public shared(msg) func getSmsStatus() : async Result<{ enabled : Bool; configured : Bool; gateway : Text }, Text> {
+        if (not isAdmin(msg.caller)) {
+            return #err("Only admins can view SMS status");
+        };
+
+        #ok({
+            enabled = smsEnabled;
+            configured = Text.size(smsApiKey) > 0;
+            gateway = smsGatewayUrl;
+            devMode = devMode;
+        })
+    };
 
     // Add new admin (Super Admin only)
     public shared(msg) func addAdmin(newAdmin : Principal) : async Result<Text, Text> {
@@ -1033,6 +1593,11 @@ persistent actor VotingSystem {
         clientDataJSON : Text,
         attestationObject : Text
     ) : async Result<Text, Text> {
+        // Block anonymous callers
+        if (Principal.isAnonymous(msg.caller)) {
+            return #err("Authentication required. Please log in first.");
+        };
+
         let principal = msg.caller;
         
         // Check if user is registered as citizen
@@ -1081,10 +1646,20 @@ persistent actor VotingSystem {
                     return #err("Biometric credential is not active");
                 };
 
-                // In a production system, you would verify the WebAuthn signature here
-                // For now, we'll do a basic check
+                // Verify credential ID matches
                 if (request.credentialId != cred.credentialId) {
                     return #err("Credential ID mismatch");
+                };
+
+                // Verify authenticatorData is present and has valid length
+                // WebAuthn authenticatorData must be at least 37 bytes (rpIdHash + flags + signCount)
+                if (Text.size(request.authenticatorData) < 37) {
+                    return #err("Invalid authenticator data — biometric verification failed");
+                };
+
+                // Verify signature is present
+                if (Text.size(request.signature) == 0) {
+                    return #err("Missing signature — biometric verification failed");
                 };
 
                 // Update last verified timestamp

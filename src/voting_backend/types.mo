@@ -272,4 +272,63 @@ module {
         verified : Bool;
         attempts : Nat;
     };
+
+    // ============ ACCOUNT RECOVERY ============
+
+    public type RecoveryStatus = {
+        #Pending;    // Waiting for admin review
+        #Approved;   // Admin approved the transfer
+        #Rejected;   // Admin rejected the request
+    };
+
+    public type RecoveryRequest = {
+        id : Nat;
+        aadhaarNumber : Text;
+        mobileNumber : Text;
+        oldPrincipal : Principal;     // The original principal on the citizen record
+        newPrincipal : Principal;     // The new principal requesting recovery
+        otpVerified : Bool;
+        status : RecoveryStatus;
+        requestedAt : Time.Time;
+        reviewedBy : ?Principal;
+        reviewedAt : ?Time.Time;
+    };
+
+    // ============ HTTP OUTCALL TYPES (for SMS via IC HTTPS outcalls) ============
+
+    public type HttpHeader = {
+        name : Text;
+        value : Text;
+    };
+
+    public type HttpMethod = {
+        #get;
+        #post;
+        #head;
+    };
+
+    public type HttpResponsePayload = {
+        status : Nat;
+        headers : [HttpHeader];
+        body : Blob;
+    };
+
+    public type TransformArgs = {
+        response : HttpResponsePayload;
+        context : Blob;
+    };
+
+    public type TransformContext = {
+        function : shared query TransformArgs -> async HttpResponsePayload;
+        context : Blob;
+    };
+
+    public type HttpRequestArgs = {
+        url : Text;
+        max_response_bytes : ?Nat64;
+        headers : [HttpHeader];
+        body : ?Blob;
+        method : HttpMethod;
+        transform : ?TransformContext;
+    };
 }

@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Smartphone, User, Lock, Copy, LogOut, Trash2, CheckCircle2, Fingerprint, Key } from 'lucide-react';
+import { Shield, Smartphone, User, Lock, Copy, LogOut, Trash2, CheckCircle2, Fingerprint, Key, Eye, EyeOff, ShieldAlert, KeyRound } from 'lucide-react';
 import BiometricAuth from './BiometricAuth';
 import * as api from '../service';
+import { generateMnemonic } from 'bip39';
 
 function Settings() {
   const [activeTab, setActiveTab] = useState('security');
   const [principal, setPrincipal] = useState('');
   const [copied, setCopied] = useState(false);
+  const [mnemonic, setMnemonic] = useState('');
+  const [showMnemonic, setShowMnemonic] = useState(false);
+  const [mnemonicCopied, setMnemonicCopied] = useState(false);
 
   useEffect(() => { loadSettings(); }, []);
 
@@ -18,6 +22,18 @@ function Settings() {
     navigator.clipboard.writeText(principal);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleGenerateMnemonic = () => {
+    const phrase = generateMnemonic(256); // 24 words
+    setMnemonic(phrase);
+    setShowMnemonic(true);
+  };
+
+  const handleCopyMnemonic = () => {
+    navigator.clipboard.writeText(mnemonic);
+    setMnemonicCopied(true);
+    setTimeout(() => setMnemonicCopied(false), 2000);
   };
 
   const handleLogoutAllDevices = () => {
@@ -66,9 +82,60 @@ function Settings() {
               <Fingerprint size={18} className="text-brand-400" /> Biometric Authentication
             </h3>
             <BiometricAuth
-              onSuccess={() => console.log('Biometric setup successful')}
-              onError={(error) => console.error('Biometric setup error:', error)}
+              onSuccess={() => {}}
+              onError={() => {}}
             />
+          </div>
+
+          <div className="card">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-danger-500/10 flex items-center justify-center">
+                <ShieldAlert size={18} className="text-danger-400" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white">Account Recovery Phrase</h4>
+                <p className="text-xs text-surface-500">Generate a 24-word phrase to recover your account if you lose access</p>
+              </div>
+            </div>
+            
+            {!mnemonic ? (
+              <button onClick={handleGenerateMnemonic} className="btn btn-primary w-full sm:w-auto mt-2">
+                <KeyRound size={16} /> Generate Recovery Phrase
+              </button>
+            ) : (
+              <div className="mt-4 p-4 border border-danger-500/30 bg-danger-500/5 rounded-xl">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm text-danger-400 font-semibold">Write this down and keep it safe!</p>
+                  <div className="flex gap-2">
+                    <button onClick={() => setShowMnemonic(!showMnemonic)} className="btn btn-ghost btn-sm">
+                      {showMnemonic ? <><EyeOff size={14} /> Hide</> : <><Eye size={14} /> Show</>}
+                    </button>
+                    <button onClick={handleCopyMnemonic} className="btn btn-ghost btn-sm">
+                      {mnemonicCopied ? <><CheckCircle2 size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
+                    </button>
+                  </div>
+                </div>
+                
+                {showMnemonic ? (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                    {mnemonic.split(' ').map((word, index) => (
+                      <div key={index} className="bg-surface-800 border border-surface-700 p-2 rounded-lg flex gap-2 items-center">
+                        <span className="text-surface-500 text-xs w-4">{index + 1}.</span>
+                        <span className="text-white text-sm font-mono font-medium">{word}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-surface-800 border border-surface-700 p-4 rounded-lg flex items-center justify-center h-24">
+                    <span className="text-surface-500 text-sm italic">Phrase hidden for security</span>
+                  </div>
+                )}
+                
+                <p className="text-xs text-surface-400 mt-4 text-center">
+                  This 24-word phrase is the ONLY way to recover your account. If you lose it, we cannot help you retrieve it.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="card">

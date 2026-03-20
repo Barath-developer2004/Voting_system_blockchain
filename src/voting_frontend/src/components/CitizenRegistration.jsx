@@ -72,8 +72,7 @@ function CitizenRegistration() {
         setOtpMessage({ type: 'error', text: result.err });
       }
     } catch (error) {
-      console.error('OTP request error:', error);
-      setOtpMessage({ type: 'error', text: 'Failed to request OTP: ' + error.message });
+      setOtpMessage({ type: 'error', text: 'Failed to request OTP. Please try again.' });
     } finally {
       setOtpLoading(false);
     }
@@ -97,8 +96,7 @@ function CitizenRegistration() {
         setOtpMessage({ type: 'error', text: result.err });
       }
     } catch (error) {
-      console.error('OTP verify error:', error);
-      setOtpMessage({ type: 'error', text: 'Verification failed: ' + error.message });
+      setOtpMessage({ type: 'error', text: 'Verification failed. Please try again.' });
     } finally {
       setOtpLoading(false);
     }
@@ -111,14 +109,10 @@ function CitizenRegistration() {
 
     try {
       // Check if already authenticated, if not login first
-      console.log('🔐 Checking authentication...');
       const isAuth = await api.isAuthenticated();
-      console.log('🔐 Is authenticated:', isAuth);
 
       if (!isAuth) {
-        console.log('🔐 Not authenticated, initiating login...');
         await api.login();
-        console.log('🔐 Login completed');
       }
 
       // Prepare data
@@ -140,34 +134,22 @@ function CitizenRegistration() {
         mobileNumber: formData.mobileNumber,
         address: address,
         gender: gender,
-        aadhaarPhotoUrl: formData.aadhaarPhotoUrl || 'https://via.placeholder.com/150',
-        photoUrl: formData.photoUrl || 'https://via.placeholder.com/150',
+        aadhaarPhotoUrl: formData.aadhaarPhotoUrl,
+        photoUrl: formData.photoUrl,
         voterIdNumber: formData.voterIdNumber
       };
 
-      console.log('📝 Submitting registration:', registrationData);
-
       // Register citizen
       const result = await api.registerCitizen(registrationData);
-
-      console.log('✅ Registration result:', result);
 
       if (result.ok) {
         setMessage({ type: 'success', text: '✅ Registration successful! Please setup biometric login.' });
         setRegistrationSuccess(true);
         // Do not reset form or redirect yet.
       } else {
-        console.error('❌ Registration error from backend:', result.err);
         setMessage({ type: 'error', text: '❌ ' + result.err });
       }
     } catch (error) {
-      console.error('❌ Registration exception:', error);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
-
       // Check if it's a signature error (authentication issue)
       if (error.message && error.message.includes('Invalid signature')) {
         setMessage({
@@ -175,7 +157,7 @@ function CitizenRegistration() {
           text: '❌ Authentication session expired. Please logout and login again to register.'
         });
       } else {
-        setMessage({ type: 'error', text: '❌ Registration failed: ' + (error.message || 'Please try again.') });
+        setMessage({ type: 'error', text: '❌ Registration failed. Please try again.' });
       }
     } finally {
       setLoading(false);
@@ -432,20 +414,20 @@ function CitizenRegistration() {
                 <Upload size={18} />
               </div>
               <h3 className="text-lg font-bold text-white">Documents</h3>
-              <span className="badge badge-neutral ml-auto">Optional</span>
+              <span className="badge badge-neutral ml-auto">Required</span>
             </div>
-            <p className="text-xs text-surface-500 mb-5 ml-12">For demo purposes, you can use placeholder images or leave empty</p>
+            <p className="text-xs text-surface-500 mb-5 ml-12">Provide URLs for your document photos. Both fields are required.</p>
 
             <div className="grid sm:grid-cols-2 gap-5">
               <div>
-                <label className="label">Aadhaar Photo URL</label>
+                <label className="label">Aadhaar Photo URL <span className="text-danger-400">*</span></label>
                 <input type="text" name="aadhaarPhotoUrl" value={formData.aadhaarPhotoUrl}
-                  onChange={handleChange} className="input" placeholder="https://..." />
+                  onChange={handleChange} className="input" placeholder="https://..." required />
               </div>
               <div>
-                <label className="label">Your Photo URL</label>
+                <label className="label">Your Photo URL <span className="text-danger-400">*</span></label>
                 <input type="text" name="photoUrl" value={formData.photoUrl}
-                  onChange={handleChange} className="input" placeholder="https://..." />
+                  onChange={handleChange} className="input" placeholder="https://..." required />
               </div>
             </div>
           </div>

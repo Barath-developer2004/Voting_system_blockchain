@@ -133,23 +133,52 @@ export type ElectionType = { 'Referendum' : null } |
 export type Gender = { 'Male' : null } |
   { 'Female' : null } |
   { 'Other' : null };
+export interface HttpHeader { 'value' : string, 'name' : string }
+export interface HttpResponsePayload {
+  'status' : bigint,
+  'body' : Uint8Array | number[],
+  'headers' : Array<HttpHeader>,
+}
+export interface RecoveryRequest {
+  'id' : bigint,
+  'status' : RecoveryStatus,
+  'newPrincipal' : Principal,
+  'otpVerified' : boolean,
+  'mobileNumber' : string,
+  'reviewedAt' : [] | [Time],
+  'reviewedBy' : [] | [Principal],
+  'oldPrincipal' : Principal,
+  'aadhaarNumber' : string,
+  'requestedAt' : Time,
+}
+export type RecoveryStatus = { 'Approved' : null } |
+  { 'Rejected' : null } |
+  { 'Pending' : null };
 export type Result = { 'ok' : string } |
   { 'err' : string };
 export type Result_1 = { 'ok' : boolean } |
   { 'err' : string };
-export type Result_2 = { 'ok' : Array<Citizen> } |
+export type Result_10 = { 'ok' : Array<Principal> } |
   { 'err' : string };
-export type Result_3 = { 'ok' : Citizen } |
+export type Result_11 = { 'ok' : bigint } |
   { 'err' : string };
-export type Result_4 = { 'ok' : ElectionResults } |
+export type Result_2 = {
+    'ok' : { 'enabled' : boolean, 'configured' : boolean, 'gateway' : string }
+  } |
   { 'err' : string };
-export type Result_5 = { 'ok' : Election } |
+export type Result_3 = { 'ok' : Array<RecoveryRequest> } |
   { 'err' : string };
-export type Result_6 = { 'ok' : Array<AuditLog> } |
+export type Result_4 = { 'ok' : Array<Citizen> } |
   { 'err' : string };
-export type Result_7 = { 'ok' : Array<Principal> } |
+export type Result_5 = { 'ok' : { 'status' : string, 'requestId' : bigint } } |
   { 'err' : string };
-export type Result_8 = { 'ok' : bigint } |
+export type Result_6 = { 'ok' : Citizen } |
+  { 'err' : string };
+export type Result_7 = { 'ok' : ElectionResults } |
+  { 'err' : string };
+export type Result_8 = { 'ok' : Election } |
+  { 'err' : string };
+export type Result_9 = { 'ok' : Array<AuditLog> } |
   { 'err' : string };
 export interface Statistics {
   'totalElections' : bigint,
@@ -160,6 +189,10 @@ export interface Statistics {
   'pendingVerifications' : bigint,
 }
 export type Time = bigint;
+export interface TransformArgs {
+  'context' : Uint8Array | number[],
+  'response' : HttpResponsePayload,
+}
 export type VoterStatus = { 'Suspended' : null } |
   { 'Rejected' : null } |
   { 'Verified' : null } |
@@ -167,22 +200,26 @@ export type VoterStatus = { 'Suspended' : null } |
 export interface _SERVICE {
   'addAdmin' : ActorMethod<[Principal], Result>,
   'addAdminByInitializer' : ActorMethod<[Principal], Result>,
-  'addCandidate' : ActorMethod<[CandidateInput], Result_8>,
+  'addCandidate' : ActorMethod<[CandidateInput], Result_11>,
   'amIAdmin' : ActorMethod<[], boolean>,
   'castVote' : ActorMethod<[bigint, bigint], Result>,
-  'createElection' : ActorMethod<[ElectionInput], Result_8>,
+  'configureSms' : ActorMethod<[string, boolean, [] | [string]], Result>,
+  'createElection' : ActorMethod<[ElectionInput], Result_11>,
   'endVoting' : ActorMethod<[bigint], Result>,
   'enrollBiometricCredential' : ActorMethod<[string, string, string], Result>,
-  'getAdmins' : ActorMethod<[], Result_7>,
-  'getAllCitizens' : ActorMethod<[], Result_2>,
+  'getAdmins' : ActorMethod<[], Result_10>,
+  'getAllCitizens' : ActorMethod<[], Result_4>,
   'getAllElections' : ActorMethod<[], Array<Election>>,
-  'getAuditLogs' : ActorMethod<[bigint], Result_6>,
+  'getAuditLogs' : ActorMethod<[bigint], Result_9>,
   'getBiometricStatus' : ActorMethod<[], Result_1>,
   'getCandidates' : ActorMethod<[bigint], Array<Candidate>>,
-  'getElection' : ActorMethod<[bigint], Result_5>,
-  'getElectionResults' : ActorMethod<[bigint], Result_4>,
-  'getMyCitizenProfile' : ActorMethod<[], Result_3>,
-  'getPendingCitizens' : ActorMethod<[], Result_2>,
+  'getElection' : ActorMethod<[bigint], Result_8>,
+  'getElectionResults' : ActorMethod<[bigint], Result_7>,
+  'getMyCitizenProfile' : ActorMethod<[], Result_6>,
+  'getMyRecoveryStatus' : ActorMethod<[string], Result_5>,
+  'getPendingCitizens' : ActorMethod<[], Result_4>,
+  'getPendingRecoveryRequests' : ActorMethod<[], Result_3>,
+  'getSmsStatus' : ActorMethod<[], Result_2>,
   'getStatistics' : ActorMethod<[], Statistics>,
   'getSystemInfo' : ActorMethod<
     [],
@@ -206,7 +243,11 @@ export interface _SERVICE {
   >,
   'removeBiometricCredential' : ActorMethod<[], Result>,
   'requestAadhaarOTP' : ActorMethod<[string, string], Result>,
+  'requestRecoveryOTP' : ActorMethod<[string, string], Result>,
+  'reviewRecoveryRequest' : ActorMethod<[bigint, boolean], Result>,
+  'setDevMode' : ActorMethod<[boolean], Result>,
   'startVoting' : ActorMethod<[bigint], Result>,
+  'transform' : ActorMethod<[TransformArgs], HttpResponsePayload>,
   'verifyAadhaarOTP' : ActorMethod<[string, string], Result>,
   'verifyBiometricCredential' : ActorMethod<
     [BiometricVerificationRequest],
@@ -216,6 +257,7 @@ export interface _SERVICE {
     [Principal, boolean, [] | [string], [] | [string]],
     Result
   >,
+  'verifyRecoveryOTP' : ActorMethod<[string, string], Result>,
 }
 export declare const idlFactory: IDL.InterfaceFactory;
 export declare const init: (args: { IDL: typeof IDL }) => IDL.Type[];
