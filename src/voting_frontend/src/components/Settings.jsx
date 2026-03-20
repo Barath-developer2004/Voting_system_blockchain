@@ -1,16 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, Smartphone, User, Lock, Copy, LogOut, Trash2, CheckCircle2, Fingerprint, Key, Eye, EyeOff, ShieldAlert, KeyRound } from 'lucide-react';
+import { Shield, Smartphone, User, Lock, Copy, LogOut, Trash2, CheckCircle2, Fingerprint, Key, ShieldAlert, KeyRound } from 'lucide-react';
 import BiometricAuth from './BiometricAuth';
 import * as api from '../service';
-import { generateMnemonic } from 'bip39';
 
 function Settings() {
   const [activeTab, setActiveTab] = useState('security');
   const [principal, setPrincipal] = useState('');
   const [copied, setCopied] = useState(false);
-  const [mnemonic, setMnemonic] = useState('');
-  const [showMnemonic, setShowMnemonic] = useState(false);
-  const [mnemonicCopied, setMnemonicCopied] = useState(false);
 
   useEffect(() => { loadSettings(); }, []);
 
@@ -22,18 +18,6 @@ function Settings() {
     navigator.clipboard.writeText(principal);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleGenerateMnemonic = () => {
-    const phrase = generateMnemonic(256); // 24 words
-    setMnemonic(phrase);
-    setShowMnemonic(true);
-  };
-
-  const handleCopyMnemonic = () => {
-    navigator.clipboard.writeText(mnemonic);
-    setMnemonicCopied(true);
-    setTimeout(() => setMnemonicCopied(false), 2000);
   };
 
   const handleLogoutAllDevices = () => {
@@ -94,48 +78,28 @@ function Settings() {
               </div>
               <div>
                 <h4 className="text-sm font-bold text-white">Account Recovery Phrase</h4>
-                <p className="text-xs text-surface-500">Generate a 24-word phrase to recover your account if you lose access</p>
+                <p className="text-xs text-surface-500">Secure your account with an Internet Identity recovery phrase</p>
               </div>
             </div>
             
-            {!mnemonic ? (
-              <button onClick={handleGenerateMnemonic} className="btn btn-primary w-full sm:w-auto mt-2">
-                <KeyRound size={16} /> Generate Recovery Phrase
-              </button>
-            ) : (
-              <div className="mt-4 p-4 border border-danger-500/30 bg-danger-500/5 rounded-xl">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm text-danger-400 font-semibold">Write this down and keep it safe!</p>
-                  <div className="flex gap-2">
-                    <button onClick={() => setShowMnemonic(!showMnemonic)} className="btn btn-ghost btn-sm">
-                      {showMnemonic ? <><EyeOff size={14} /> Hide</> : <><Eye size={14} /> Show</>}
-                    </button>
-                    <button onClick={handleCopyMnemonic} className="btn btn-ghost btn-sm">
-                      {mnemonicCopied ? <><CheckCircle2 size={14} /> Copied</> : <><Copy size={14} /> Copy</>}
-                    </button>
-                  </div>
-                </div>
-                
-                {showMnemonic ? (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                    {mnemonic.split(' ').map((word, index) => (
-                      <div key={index} className="bg-surface-800 border border-surface-700 p-2 rounded-lg flex gap-2 items-center">
-                        <span className="text-surface-500 text-xs w-4">{index + 1}.</span>
-                        <span className="text-white text-sm font-mono font-medium">{word}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="bg-surface-800 border border-surface-700 p-4 rounded-lg flex items-center justify-center h-24">
-                    <span className="text-surface-500 text-sm italic">Phrase hidden for security</span>
-                  </div>
-                )}
-                
-                <p className="text-xs text-surface-400 mt-4 text-center">
-                  This 24-word phrase is the ONLY way to recover your account. If you lose it, we cannot help you retrieve it.
-                </p>
+            <div className="mt-2 p-4 border border-surface-700 bg-surface-800 rounded-xl">
+              <p className="text-sm text-surface-300 mb-4">
+                Since this application uses the Internet Computer's native <strong>Internet Identity</strong> for authentication, your account recovery is securely managed by the network itself.
+              </p>
+              <p className="text-sm text-surface-300 mb-5">
+                We strongly recommend setting up a Recovery Phrase in your Internet Identity management portal. If you lose your current device without one, you will permanently lose access to your citizen profile and voting history.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <a 
+                  href="https://identity.ic0.app/" 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="btn btn-primary flex-1 justify-center"
+                >
+                  <KeyRound size={16} /> Manage Internet Identity
+                </a>
               </div>
-            )}
+            </div>
           </div>
 
           <div className="card">
